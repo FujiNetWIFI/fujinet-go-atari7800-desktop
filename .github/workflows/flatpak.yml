@@ -1,0 +1,71 @@
+name: Flatpak
+
+# The strictest test of the clone-and-build promise in the project: the
+# sandbox has NO NETWORK during the build, so anything the manifest does not
+# declare is simply absent. Both dependencies (the MAME fork, built as its
+# own mame-fngo module, and fujinet-firmware), SDL3, mbedTLS 3.6.5 and the
+# python wheels the FujiNet web-UI build needs are all declared sources,
+# pinned to the same commits cmake/Dependencies.cmake uses.
+#
+# Both manifests build the full FujiNet runtime, so this is also the job that
+# proves libfujinet still builds from a clean tree.
+#
+# flatpak-builder is driven directly rather than through the community
+# container action, whose tags stop well short of the runtimes here.
+# --disable-rofiles-fuse because FUSE is not available to the runner user.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        manifest:
+          - build-aux/flatpak/online.fujinet.go.atari7800.gnome.yml
+          - build-aux/flatpak/online.fujinet.go.atari7800.kde.yml
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install flatpak and flatpak-builder
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y flatpak flatpak-builder
+          flatpak remote-add --if-not-exists --user flathub \
+            https://dl.flathub.org/repo/flathub.flatpakrepo
+
+      - name: Install the runtime and SDK this manifest targets
+        run: |
+          runtime=$(sed -n 's/^runtime: *//p' "${{ matrix.manifest }}")
+          runtime_version=$(sed -n "s/^runtime-version: *'\(.*\)'/\1/p" "${{ matrix.manifest }}")
+          sdk=$(sed -n 's/^sdk: *//p' "${{ matrix.manifest }}")
+          flatpak install -y --user flathub \
+            "${runtime}/x86_64/${runtime_version}" \
+            "${sdk}/x86_64/${runtime_version}"
+
+      # flatpak-builder's own per-module cache: the mame-fngo module is only
+      # rebuilt when its pin changes
+      - name: Restore the flatpak-builder cache
+        id: fb-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .flatpak-builder
+          key: flatpak-builder-${{ matrix.manifest }}-${{ hashFiles(matrix.manifest) }}
+          restore-keys: flatpak-builder-${{ matrix.manifest }}-
+
+      - name: Build
+        run: |
+          flatpak-builder --user --force-clean --disable-rofiles-fuse \
+            build-flatpak "${{ matrix.manifest }}"
+
+      - name: Save the flatpak-builder cache
+        if: always() && steps.fb-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .flatpak-builder
+          key: ${{ steps.fb-cache.outputs.cache-primary-key }}

@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>online.fujinet.go.atari7800.kde</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <name>FujiNet Go Atari 7800</name>
+  <summary>An Atari 7800 with a built-in FujiNet</summary>
+  <description>
+    <p>
+      A self-contained Atari 7800 with a FujiNet built in: browse a network
+      host from the console, boot cartridges over the network, and let the
+      booted program keep talking to the network, all in one application.
+    </p>
+    <p>
+      The emulator is MAME's Atari 7800, with the FujiNet Atari 7800
+      cartridge running the real cartridge firmware's own protocol sources
+      and mapper engine, so it behaves exactly as the hardware does: CONFIG
+      starts through the cartridge's boot block and loader, games booted over
+      the network are copied into its SRAM, and a local .a78 file can be
+      opened in place of CONFIG.
+    </p>
+    <p>
+      No BIOS is needed: the console starts the cartridge directly. Your own
+      BIOS can be imported to see the Atari logo, and the High Score Cart's
+      ROM to keep high scores. Both ProLine joysticks and the console's
+      switches are on screen and remappable, the XG-1 light gun is aimed
+      with the mouse, gamepads are picked up as they are plugged in, and a
+      native debugger built on MAME's own engine is a key press away.
+    </p>
+    <p>
+      Nothing copyrighted is included: the only built-in program is
+      FujiNet's own CONFIG client.
+    </p>
+  </description>
+  <launchable type="desktop-id">online.fujinet.go.atari7800.kde.desktop</launchable>
+  <url type="homepage">https://fujinet.online/</url>
+  <url type="bugtracker">https://github.com/FujiNetWIFI/fujinet-go-atari7800-desktop/issues</url>
+  <developer id="online.fujinet">
+    <name>Thomas Cherryhomes</name>
+  </developer>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <!-- The CURRENT release templates its version from @PROJECT_VERSION@, so
+         it cannot disagree with the tree; past releases are literal. The
+         release job checks that this first entry is still a template. -->
+    <release version="@PROJECT_VERSION@" date="2026-10-08">
+      <description>
+        <p>
+          First release: MAME's Atari 7800 with the FujiNet Atari 7800
+          cartridge, an in-process FujiNet, no BIOS needed, NTSC and PAL
+          consoles, ProLine joysticks, 2600 joysticks and the XG-1 light gun,
+          the High Score Cart, native GNOME, KDE, macOS and Windows frontends,
+          hotplugged gamepads, and a native debugger.
+        </p>
+      </description>
+    </release>
+  </releases>
+</component>

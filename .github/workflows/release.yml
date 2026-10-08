@@ -1,0 +1,550 @@
+name: Release
+
+# Cutting a release. Triggered by a `v*` tag, builds every artifact this
+# repository publishes -- Linux packages for both frontends (.deb/.rpm/.tar.gz
+# via CPack), both flatpak single-file bundles, zipped macOS app bundles for
+# Apple Silicon (arm64) and Intel (x86_64), and a Windows (x86-64) portable
+# zip plus NSIS installer -- and attaches them to a draft GitHub Release.
+#
+# What is and is not proven, so a red run can be read correctly:
+#   linux, flatpak   run locally and in CI; a failure is a regression.
+#   windows          the whole app cross-builds with mingw-w64 and its tests
+#                    pass under Wine, but this is the first NATIVE build.
+#   macos            never compiled anywhere. A failure here is real signal
+#                    about frontends/macos, not necessarily the workflow.
+#
+# The version is declared in the tree, not derived from the tag, so a
+# downloaded build's About box can never disagree with the download it came
+# from. The check-version job below enforces that.
+#
+# Nothing copyrighted is embedded in any artifact: the console boots the
+# FujiNet cartridge with no BIOS, the only built-in image is FujiNet's own
+# CONFIG client, and WITH_A7800_ROMS stays at its default OFF (see
+# COMPLIANCE.md; the no_embedded_roms tests check the shipped binaries).
+#
+# MAME (libmame_fngo) is the long build in every job: each one restores the
+# objects the push-CI workflows cache for the same pin.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  check-version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: The tag must match the version declared in the tree
+        id: v
+        run: |
+          tag="${GITHUB_REF#refs/tags/v}"
+          echo "tag version: $tag"
+          cmake_version=$(sed -n 's/^project([^)]*VERSION \([0-9][0-9.]*\).*/\1/p' CMakeLists.txt)
+          echo "CMakeLists.txt version: $cmake_version"
+          if [ "$tag" != "$cmake_version" ]; then
+            echo "::error::tag v$tag does not match CMakeLists.txt's project() VERSION $cmake_version"
+            exit 1
+          fi
+          # Both metainfo files are TEMPLATES: their <release version="..."> is
+          # @PROJECT_VERSION@, substituted at configure time. So they cannot
+          # disagree with the tree's version the way a hardcoded one can -- the
+          # sibling ports check that they match; here the check is that the
+          # template is still a template, which is what makes the guarantee
+          # hold. What still needs a human is the release DATE and notes.
+          for m in frontends/gnome/data/*.metainfo.xml.in \
+                   frontends/kde/data/*.metainfo.xml.in; do
+            if ! grep -q '<release version="@PROJECT_VERSION@"' "$m"; then
+              echo "::error::$m no longer templates its release version -- it"
+              echo "::error::would then be free to disagree with project() VERSION"
+              exit 1
+            fi
+          done
+          echo "version=$tag" >> "$GITHUB_OUTPUT"
+
+  linux-packages:
+    needs: check-version
+    strategy:
+      fail-fast: false
+      matrix:
+        frontend: [gnome, kde]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Same package list as linux.yml, plus dpkg-dev/rpm for CPack's DEB
+      # and RPM generators (ubuntu-latest has dpkg-deb already; rpmbuild
+      # does not ship by default).
+      - name: Install build tools and frontend toolkits
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential cmake ninja-build python3 pkg-config git \
+            libgtk-4-dev libadwaita-1-dev \
+            qt6-base-dev libqt6opengl6-dev \
+            desktop-file-utils appstream \
+            libx11-dev libxext-dev libxrandr-dev libxi-dev libxss-dev \
+            libxcursor-dev libxkbcommon-dev libwayland-dev libdrm-dev \
+            libgbm-dev libgl1-mesa-dev libpulse-dev libasound2-dev \
+            libxtst-dev dpkg-dev rpm
+
+      # Statically linked (unlike linux.yml's push-CI job, which links the
+      # packaged shared SDL3 for speed), so the shipped .deb/.rpm/.tar.gz
+      # have no libSDL3.so runtime dependency -- same reasoning as the
+      # release-grade SDL3 build the windows-package/macos-package jobs use.
+      - name: Build and install static SDL3 (release-3.4.12, pinned)
+        run: |
+          git clone --depth 1 --branch release-3.4.12 \
+            https://github.com/libsdl-org/SDL.git /tmp/sdl3-src
+          cmake -S /tmp/sdl3-src -B /tmp/sdl3-build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX=/tmp/sdl3-install \
+            -DSDL_SHARED=OFF -DSDL_STATIC=ON -DSDL_TEST_LIBRARY=OFF
+          cmake --build /tmp/sdl3-build
+          cmake --install /tmp/sdl3-build
+
+      - name: Restore MAME (source + objects) from the push-CI cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            third_party/mame
+            build/mame
+          key: mame-linux-x64-${{ hashFiles('cmake/Dependencies.cmake', 'cmake/BuildMame.cmake') }}
+
+      - name: Restore MAME (source + objects) from the push-CI cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            third_party/mame
+            build/mame
+          key: mame-macos-${{ matrix.arch }}-${{ hashFiles('cmake/Dependencies.cmake', 'cmake/BuildMame.cmake') }}
+
+      - name: Configure
+        run: |
+          cmake -B build -G Ninja \
+            -DCMAKE_PREFIX_PATH=/tmp/sdl3-install
+            -DCMAKE_INSTALL_PREFIX=/usr \
+            -DFRONTEND=${{ matrix.frontend }} \
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Test
+        working-directory: build
+        run: ctest --output-on-failure
+
+      # Confirms the switch to static SDL3 actually took: a shared build
+      # left unnoticed here would ship a .deb/.rpm that depends on a
+      # libSDL3.so no target machine (and no apt/dnf repo) actually has.
+      - name: Verify the built binary has no libSDL3.so dependency
+        run: |
+          BIN="build/frontends/${{ matrix.frontend }}/fujinet-go-atari7800-${{ matrix.frontend }}"
+          test -f "$BIN" || { echo "::error::$BIN not built"; exit 1; }
+          if ldd "$BIN" | grep -qi libSDL3; then
+            echo "::error::$BIN dynamically links libSDL3 -- static link did not take"
+            ldd "$BIN"
+            exit 1
+          fi
+
+      - name: Package (deb, rpm, tar.gz)
+        working-directory: build
+        run: cpack -G "DEB;RPM;TGZ"
+
+      # The emulator is a private library beside libfujinet; a package
+      # without it installs an app that cannot start.
+      - name: Verify the packages carry libmame_fngo
+        working-directory: build
+        run: |
+          dpkg-deb -c *.deb | grep -q 'lib/fujinet-go-atari7800/libmame_fngo.so' \
+            || { echo "::error::libmame_fngo.so missing from the .deb"; exit 1; }
+          rpm -qlp *.rpm | grep -q 'lib/fujinet-go-atari7800/libmame_fngo.so' \
+            || { echo "::error::libmame_fngo.so missing from the .rpm"; exit 1; }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-${{ matrix.frontend }}
+          path: |
+            build/*.deb
+            build/*.rpm
+            build/*.tar.gz
+          if-no-files-found: error
+
+  flatpaks:
+    needs: check-version
+    strategy:
+      fail-fast: false
+      matrix:
+        manifest:
+          - build-aux/flatpak/online.fujinet.go.atari7800.gnome.yml
+          - build-aux/flatpak/online.fujinet.go.atari7800.kde.yml
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install flatpak and flatpak-builder
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y flatpak flatpak-builder
+          flatpak remote-add --if-not-exists --user flathub \
+            https://dl.flathub.org/repo/flathub.flatpakrepo
+
+      - name: Install the runtime and SDK this manifest targets
+        run: |
+          runtime=$(sed -n 's/^runtime: *//p' "${{ matrix.manifest }}")
+          runtime_version=$(sed -n "s/^runtime-version: *'\(.*\)'/\1/p" "${{ matrix.manifest }}")
+          sdk=$(sed -n 's/^sdk: *//p' "${{ matrix.manifest }}")
+          flatpak install -y --user flathub \
+            "${runtime}/x86_64/${runtime_version}" \
+            "${sdk}/x86_64/${runtime_version}"
+
+      - name: Build and export to a local repo
+        run: |
+          flatpak-builder --user --force-clean --repo=repo \
+            --disable-rofiles-fuse build-flatpak "${{ matrix.manifest }}"
+
+      - name: Bundle into a single installable file
+        id: bundle
+        run: |
+          app_id=$(sed -n 's/^app-id: *//p' "${{ matrix.manifest }}")
+          flatpak build-bundle repo "${app_id}.flatpak" "${app_id}" master
+          echo "app_id=${app_id}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flatpak-${{ steps.bundle.outputs.app_id }}
+          path: '*.flatpak'
+          if-no-files-found: error
+
+  windows-package:
+    needs: check-version
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            git
+            make
+            patch
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-python
+            mingw-w64-ucrt-x86_64-nsis
+
+      # Statically linked (unlike windows.yml's push-CI job, which uses the
+      # packaged mingw-w64-ucrt-x86_64-sdl3), so the shipped .exe has no
+      # loose SDL3.dll dependency -- same reasoning as the release-grade
+      # SDL3 build the sibling CoCo/ADAM/Apple II desktop repos use.
+      - name: Build and install static SDL3 (release-3.4.12, pinned)
+        run: |
+          git clone --depth 1 --branch release-3.4.12 \
+            https://github.com/libsdl-org/SDL.git sdl3-src
+          cmake -S sdl3-src -B sdl3-src/build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release -DSDL_SHARED=OFF -DSDL_STATIC=ON \
+            -DSDL_TEST_LIBRARY=OFF -DCMAKE_INSTALL_PREFIX=/ucrt64
+          cmake --build sdl3-src/build
+          cmake --install sdl3-src/build
+
+      - name: Restore MAME (source + objects) from the push-CI cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            third_party/mame
+            build/mame
+          key: mame-windows-ucrt64-${{ hashFiles('cmake/Dependencies.cmake', 'cmake/BuildMame.cmake') }}
+
+      - name: Configure
+        run: cmake -B build -G Ninja
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Test
+        working-directory: build
+        run: ctest --output-on-failure
+
+      # All three binaries in the artifact must depend only on system DLLs; the
+      # FujiNet DLL shipping an MSYS import (e.g. libcrypto/zlib1) would
+      # launch fine here but LoadLibrary-fail on a clean Windows box, same
+      # trap the sibling repos' own check exists to catch. ldd resolves
+      # against this machine's PATH, where the MSYS copies exist, so the
+      # import table is checked instead -- that reports a dependency as
+      # satisfied that the target will not have.
+      - name: Verify the shipped binaries are self-contained
+        run: |
+          fail=0
+          EXE=build/frontends/windows/fujinet-go-atari7800-windows.exe
+          DLL=tools/fujinet/work/out/fujinet.dll
+          MAME=build/mame/fngo/mame_fngo.dll
+          for f in "$EXE" "$DLL" "$MAME"; do
+            test -f "$f" || { echo "::error::$f not built"; exit 1; }
+            echo "--- $f imports ---"
+            imports=$(objdump -p "$f" | sed -n 's/^\s*DLL Name: //p' | sort -u)
+            echo "$imports"
+            bad=$(echo "$imports" | grep -ivE \
+              '^(api-ms-win-[a-z0-9el-]+|mame_fngo|kernel32|user32|gdi32|advapi32|shell32|ole32|oleaut32|comctl32|comdlg32|imm32|winmm|version|setupapi|dwmapi|ws2_32|iphlpapi|bcrypt|crypt32|secur32|netapi32|userenv|dbghelp|shlwapi|msvcrt|ucrtbase|rpcrt4|winspool|uxtheme|hid|cfgmgr32|powrprof|avrt|dxgi|d3d11|opengl32)\.dll$' \
+              || true)
+            if [ -n "$bad" ]; then
+              echo "::error::$f imports non-system DLLs that are not shipped:"
+              echo "$bad"
+              fail=1
+            fi
+          done
+          deps=$(ldd "$EXE" 2>/dev/null || true)
+          if echo "$deps" | grep -iE "/ucrt64|/mingw|/msys"; then
+            echo "::error::MSYS/MinGW runtime DLL leaked into the exe"
+            fail=1
+          fi
+          exit $fail
+
+      # The portable artifact is the folder you copy and run: the exe,
+      # mame_fngo.dll and fujinet.dll beside it (where the loader and the
+      # session look first), and the
+      # pristine FujiNet runtime tree it provisions from on first start. The
+      # installer packages this same staged folder, so the two downloads are
+      # the same bits, packaged twice.
+      - name: Stage the app folder
+        run: |
+          mkdir -p dist/FujiNet-Go-Atari7800/fujinet
+          cp build/frontends/windows/fujinet-go-atari7800-windows.exe \
+             dist/FujiNet-Go-Atari7800/
+          cp tools/fujinet/work/out/fujinet.dll dist/FujiNet-Go-Atari7800/
+          cp build/mame/fngo/mame_fngo.dll dist/FujiNet-Go-Atari7800/
+          cp tools/fujinet/work/out/fnconfig.ini dist/FujiNet-Go-Atari7800/fujinet/
+          cp -r tools/fujinet/work/out/data tools/fujinet/work/out/SD \
+             dist/FujiNet-Go-Atari7800/fujinet/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-portable
+          path: dist/FujiNet-Go-Atari7800
+          if-no-files-found: error
+
+      - name: Build the installer
+        run: |
+          makensis -V2 \
+            -DVERSION="${{ needs.check-version.outputs.version }}" \
+            -DSRCDIR="$(cygpath -w "$PWD/dist/FujiNet-Go-Atari7800")" \
+            -DOUTFILE="$(cygpath -w "$PWD/dist/FujiNet-Go-Atari7800-Setup.exe")" \
+            -DAPPICON="$(cygpath -w "$PWD/frontends/windows/app.ico")" \
+            build-aux/windows/installer.nsi
+          test -f dist/FujiNet-Go-Atari7800-Setup.exe \
+            || { echo "::error::installer not produced"; exit 1; }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: dist/FujiNet-Go-Atari7800-Setup.exe
+          if-no-files-found: error
+
+  # Apple Silicon (macos-latest) and Intel (macos-15-intel). Each leg
+  # builds, signs and notarises its bundle and uploads it under an
+  # arch-suffixed artifact name; the release job ships whatever legs exist.
+  macos-package:
+    needs: check-version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-latest
+          - arch: x86_64
+            runner: macos-15-intel
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build tools
+        run: brew install cmake ninja python3
+
+      - name: Confirm the runner's architecture matches the matrix leg
+        run: |
+          test "$(uname -m)" = "${{ matrix.arch }}" \
+            || { echo "::error::runner is $(uname -m), expected ${{ matrix.arch }}"; exit 1; }
+
+      # Statically linked (unlike macos.yml's push-CI job, which links the
+      # shared dylib) so the shipped .app has no Homebrew (or any
+      # non-system) library dependency -- a bundle that links /opt/homebrew
+      # paths only launches on machines that happen to have Homebrew's sdl3
+      # installed.
+      - name: Build and install static SDL3 (release-3.4.12, pinned)
+        run: |
+          git clone --depth 1 --branch release-3.4.12 \
+            https://github.com/libsdl-org/SDL.git /tmp/sdl3-src
+          cmake -S /tmp/sdl3-src -B /tmp/sdl3-build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX=/tmp/sdl3-install \
+            -DSDL_SHARED=OFF -DSDL_STATIC=ON -DSDL_TEST_LIBRARY=OFF
+          cmake --build /tmp/sdl3-build
+          sudo cmake --install /tmp/sdl3-build
+
+      - name: Configure
+        run: |
+          cmake -B build -G Ninja \
+            -DCMAKE_PREFIX_PATH=/tmp/sdl3-install \
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Test
+        working-directory: build
+        run: ctest --output-on-failure
+
+      - name: Verify the bundle is self-contained
+        run: |
+          APP="build/frontends/macos/FujiNet Go Atari 7800.app"
+          leaked=0
+          while IFS= read -r -d '' f; do
+            if file "$f" | grep -q "Mach-O"; then
+              if otool -L "$f" | tail -n +2 | grep -E "/opt/homebrew|/usr/local"; then
+                echo "--- $f"
+                otool -L "$f"
+                leaked=1
+              fi
+            fi
+          done < <(find "$APP" -type f -print0)
+          if [ "$leaked" -ne 0 ]; then
+            echo "::error::non-system library leaked into the app bundle"
+            exit 1
+          fi
+          test -f "$APP/Contents/MacOS/libfujinet.dylib" \
+            || { echo "::error::libfujinet.dylib missing from the bundle"; exit 1; }
+          test -f "$APP/Contents/Frameworks/libmame_fngo.dylib" \
+            || { echo "::error::libmame_fngo.dylib missing from the bundle"; exit 1; }
+
+      # Signing and notarisation, when the credentials are configured (see
+      # "Signing the macOS build" in the README). Without them this is a
+      # no-op and the build still produces a working, unsigned bundle.
+      - name: Sign and notarise the app bundle
+        env:
+          CERT_P12: ${{ secrets.MACOS_CERTIFICATE }}
+          CERT_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+          NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
+          NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
+          NOTARY_ISSUER: ${{ secrets.MACOS_NOTARY_ISSUER }}
+        run: |
+          set -euo pipefail
+          APP="build/frontends/macos/FujiNet Go Atari 7800.app"
+          if [ -z "${CERT_P12}" ]; then
+            echo "No signing certificate configured -- shipping unsigned."
+            exit 0
+          fi
+
+          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+          KEYCHAIN_PWD="$(uuidgen)"
+          security create-keychain -p "$KEYCHAIN_PWD" "$KEYCHAIN"
+          security set-keychain-settings -lut 900 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PWD" "$KEYCHAIN"
+          printf '%s' "$CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" \
+            -P "$CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PWD" "$KEYCHAIN" >/dev/null
+          security list-keychains -d user -s "$KEYCHAIN" \
+            $(security list-keychains -d user | sed 's/["[:space:]]//g')
+          rm -f "$RUNNER_TEMP/cert.p12"
+
+          codesign --force --timestamp --options runtime \
+            --sign "$SIGN_IDENTITY" "$APP/Contents/MacOS/libfujinet.dylib"
+          codesign --force --timestamp --options runtime \
+            --sign "$SIGN_IDENTITY" "$APP/Contents/Frameworks/libmame_fngo.dylib"
+          codesign --force --timestamp --options runtime \
+            --sign "$SIGN_IDENTITY" "$APP"
+          codesign --verify --strict --verbose=2 "$APP"
+
+          if [ -z "${NOTARY_KEY}" ]; then
+            echo "::warning::Signed, but no notary credentials -- Gatekeeper"
+            echo "::warning::will still block this build on first launch."
+            exit 0
+          fi
+
+          printf '%s' "$NOTARY_KEY" | base64 --decode > "$RUNNER_TEMP/notary.p8"
+          ditto -c -k --keepParent "$APP" "$RUNNER_TEMP/notarize.zip"
+          xcrun notarytool submit "$RUNNER_TEMP/notarize.zip" \
+            --key "$RUNNER_TEMP/notary.p8" --key-id "$NOTARY_KEY_ID" \
+            --issuer "$NOTARY_ISSUER" --wait
+          xcrun stapler staple "$APP"
+          xcrun stapler validate "$APP"
+          rm -f "$RUNNER_TEMP/notary.p8"
+
+      # ditto preserves the executable bits and structure that a plain
+      # artifact upload of a .app directory does not.
+      - name: Confirm the bundle's executable is built for this architecture
+        run: |
+          APP="build/frontends/macos/FujiNet Go Atari 7800.app"
+          for f in "$APP/Contents/MacOS/FujiNet Go Atari 7800" \
+                   "$APP/Contents/MacOS/libfujinet.dylib" \
+                   "$APP/Contents/Frameworks/libmame_fngo.dylib"; do
+            arch=$(lipo -archs "$f")
+            echo "$f: $arch"
+            case "$arch" in *"${{ matrix.arch }}"*) ;; *)
+              echo "::error::$f is built for '$arch', expected ${{ matrix.arch }}"; exit 1;;
+            esac
+          done
+
+      - name: Zip app bundle
+        run: |
+          ditto -c -k --keepParent \
+            "build/frontends/macos/FujiNet Go Atari 7800.app" \
+            FujiNet-Go-Atari7800-macos-${{ matrix.arch }}.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-app-${{ matrix.arch }}
+          path: FujiNet-Go-Atari7800-macos-${{ matrix.arch }}.zip
+          if-no-files-found: error
+
+  release:
+    needs: [check-version, linux-packages, flatpaks, windows-package, macos-package]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      # download-artifact unpacks each artifact into its own directory, so
+      # the folder-shaped Windows portable build is re-zipped here, and the
+      # Windows/macOS assets get the tag folded into their name to match the
+      # CPack-named Linux packages sitting next to them.
+      - name: Flatten artifacts into one release/ directory
+        run: |
+          tag="${{ needs.check-version.outputs.version }}"
+          mkdir -p release
+          find artifacts -type f \( -name '*.deb' -o -name '*.rpm' \
+                                    -o -name '*.tar.gz' -o -name '*.flatpak' \) \
+            -exec cp {} release/ \;
+          (cd "artifacts/windows-portable" \
+           && zip -qr "$OLDPWD/release/fujinet-go-atari7800-${tag}-windows.zip" .)
+          cp "artifacts/windows-installer/FujiNet-Go-Atari7800-Setup.exe" \
+             "release/fujinet-go-atari7800-${tag}-windows-setup.exe"
+          for zip in artifacts/macos-app-*/FujiNet-Go-Atari7800-macos-*.zip; do
+            arch="${zip##*-macos-}"; arch="${arch%.zip}"
+            cp "$zip" "release/fujinet-go-atari7800-${tag}-macos-${arch}.zip"
+          done
+          ls -l release
+
+      - name: Create (or update) the draft release and upload assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="v${{ needs.check-version.outputs.version }}"
+          if ! gh release view "$tag" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            gh release create "$tag" --repo "${{ github.repository }}" \
+              --draft --generate-notes --title "$tag"
+          fi
+          gh release upload "$tag" release/* --repo "${{ github.repository }}" --clobber

@@ -1,0 +1,24 @@
+The FujiNet Atari 7800 cartridge boots .a78 images: CONFIG mounts one and
+the ESP32 (here, the RS232 PC runtime) must push it to the cartridge over the
+DBC stream like any other cartridge ROM. discover_mediatype() only knows ROM,
+BIN, INT and ITV (and CHF upstream), so an .a78 file mounted as a plain disk
+image and the cartridge waited forever for BOOT_READY. Add A78; the
+cartridge strips the header itself. Upstream as fujinet-firmware a4d40118d on
+fujiversal-atari7800-board; carried here until the pin
+(cmake/Dependencies.cmake) moves to a commit that has it.
+
+--- a/lib/media/rs232/diskType.cpp
++++ b/lib/media/rs232/diskType.cpp
+@@ -77,8 +77,11 @@
+         // replaces the previous disksize==8192||16384||32768 heuristic
+         // (rs232Disk::mount()), which misfired on any file of those exact
+         // sizes regardless of extension and missed every other ROM size.
++        // A78 is an Atari 7800 image with its header, which the FujiNet
++        // 7800 cartridge strips.
+         if (strcasecmp(ext, "ROM") == 0 || strcasecmp(ext, "BIN") == 0 ||
+-            strcasecmp(ext, "INT") == 0 || strcasecmp(ext, "ITV") == 0)
++            strcasecmp(ext, "INT") == 0 || strcasecmp(ext, "ITV") == 0 ||
++            strcasecmp(ext, "A78") == 0)
+         {
+             return MEDIATYPE_ROM;
+         }

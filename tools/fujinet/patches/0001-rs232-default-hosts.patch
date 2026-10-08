@@ -1,0 +1,28 @@
+Upstream ships data/webui/device_specific/BUILD_RS232/ with no fnconfig.ini
+in it (just .keep and autorun.img), so tools/fujinet/build-fujinet-desktop.sh's
+collect_outputs() falls back to the generic distfiles/fnconfig.ini, which is
+Atari-flavoured (a host list of Atari community TNFS servers). Add the
+per-target default so a new install gets host slot 1 = SD, slot 2 =
+APPS.IRATA.ONLINE instead, matching the pattern the other BUILD_<TARGET>
+directories (e.g. BUILD_ADAM) already follow.
+
+diff --git a/data/webui/device_specific/BUILD_RS232/fnconfig.ini b/data/webui/device_specific/BUILD_RS232/fnconfig.ini
+new file mode 100644
+--- /dev/null
++++ b/data/webui/device_specific/BUILD_RS232/fnconfig.ini
+@@ -0,0 +1,15 @@
++[General]
++devicename=FujiNet
++fnconfig_on_spifs=1
++printer_enabled=0
++
++[Network]
++sntpserver=pool.ntp.org
++
++[Host1]
++type=SD
++name=SD
++
++[Host2]
++type=TNFS
++name=APPS.IRATA.ONLINE

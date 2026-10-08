@@ -1,0 +1,35 @@
+# Build trees. The negation matters: build-aux/ is SOURCE (flatpak manifests,
+# the NSIS installer script), and "build*/" swallows it -- new manifests then
+# never show up as untracked and quietly go missing from CI.
+build*/
+!build-aux/
+
+# Provisioned dependencies. cmake/Dependencies.cmake fetches these at their
+# pinned commits, so they are build output, not source -- and committing them
+# as bare gitlinks (which `git add -A` will happily do once they exist
+# locally) is worse than not tracking them at all: with no .gitmodules a
+# clone gets empty directories, and an empty directory is indistinguishable
+# from a populated one except by the SENTINEL test (PORTING.md 10.4).
+third_party/
+
+# FujiNet runtime build tree (tools/fujinet/build-fujinet-desktop.sh).
+tools/fujinet/work/
+
+# Cartridge, BIOS and ROM images that stray into the tree while testing.
+# The only image this project ships is FujiNet's own CONFIG client, inside
+# the MAME fork's FujiNet cartridge; the tests write their own
+# (core/tests/test_files.h). tools/roms/ holds a developer's own images for
+# WITH_A7800_ROMS builds and must never be committed (see COMPLIANCE.md).
+*.a78
+*.bin
+*.rom
+*.u7
+tools/roms/*
+!tools/roms/embed-roms.py
+*.ppm
+
+.cache/
+compile_commands.json
+.flatpak-builder/
+__pycache__/
+*.pyc

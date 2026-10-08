@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=FujiNet Go Atari 7800
+GenericName=Atari 7800 Emulator
+Comment=An Atari 7800 with a built-in FujiNet
+Exec=fujinet-go-atari7800-gnome %f
+Icon=online.fujinet.go.atari7800.gnome
+Terminal=false
+Categories=Game;Emulator;
+Keywords=atari;7800;prosystem;fujinet;emulator;retro;mame;
+MimeType=application/x-atari-7800-rom;
+StartupNotify=true

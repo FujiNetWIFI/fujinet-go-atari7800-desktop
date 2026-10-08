@@ -1,0 +1,88 @@
+name: Linux
+
+# Builds both frontends (GNOME + KDE) and runs the full test suite.
+#
+# Nothing copyrighted is needed: the console boots the FujiNet cartridge with
+# no BIOS (the MAME fork's "none" BIOS), the only built-in image is FujiNet's
+# own CONFIG client, and the tests write the small cartridges they need
+# themselves, so every test runs on every checkout (netboot, which needs the
+# cartridge bring-up's fujiboot.a78, skips).
+#
+# WITH_FUJINET=OFF here to keep the test job fast and self-contained: the
+# emulator, both frontends and every test build and run without the FujiNet
+# runtime (the cart just runs link-down). The full runtime build is exercised
+# by the Flatpak workflow, which has the complete GNOME/KDE SDK.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    env:
+      LD_LIBRARY_PATH: /tmp/sdl3-install/lib
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build tools and frontend toolkits
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential cmake ninja-build python3 pkg-config git \
+            libgtk-4-dev libadwaita-1-dev \
+            qt6-base-dev libqt6opengl6-dev \
+            desktop-file-utils appstream \
+            libx11-dev libxext-dev libxrandr-dev libxi-dev libxss-dev \
+            libxcursor-dev libxkbcommon-dev libwayland-dev libdrm-dev \
+            libgbm-dev libgl1-mesa-dev libpulse-dev libasound2-dev \
+            libxtst-dev
+
+      # SDL3 is too new to assume an apt package; built from source and pinned
+      # to the exact release the project is tested against.
+      - name: Build and install SDL3 (release-3.4.12, pinned)
+        run: |
+          git clone --depth 1 --branch release-3.4.12 \
+            https://github.com/libsdl-org/SDL.git /tmp/sdl3-src
+          cmake -S /tmp/sdl3-src -B /tmp/sdl3-build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX=/tmp/sdl3-install \
+            -DSDL_SHARED=ON -DSDL_STATIC=OFF -DSDL_TEST_LIBRARY=OFF
+          cmake --build /tmp/sdl3-build
+          cmake --install /tmp/sdl3-build
+
+      # MAME is the long pole (about nine hundred files): its pinned source
+      # and MAME's own objects are cached per pin, so later runs only relink.
+      - name: Restore MAME (source + objects)
+        id: mame-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            third_party/mame
+            build/mame
+          key: mame-linux-x64-${{ hashFiles('cmake/Dependencies.cmake', 'cmake/BuildMame.cmake') }}
+
+      - name: Configure
+        run: |
+          cmake -B build -G Ninja \
+            -DCMAKE_PREFIX_PATH=/tmp/sdl3-install \
+            -DWITH_FUJINET=OFF
+
+      - name: Build
+        run: cmake --build build
+
+      # saved even when a later step fails: the MAME build is what is expensive
+      - name: Save MAME (source + objects)
+        if: always() && steps.mame-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            third_party/mame
+            build/mame
+          key: ${{ steps.mame-cache.outputs.cache-primary-key }}
+
+      - name: Test
+        working-directory: build
+        run: ctest --output-on-failure

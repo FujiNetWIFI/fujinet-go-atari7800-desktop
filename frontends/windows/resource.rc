@@ -1,0 +1,6 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later */
+#include "resource.h"
+
+IDI_APPICON ICON "app.ico"
+
+1 24 "app.manifest"

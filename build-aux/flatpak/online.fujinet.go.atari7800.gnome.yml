@@ -1,0 +1,145 @@
+# Flatpak manifest for the GNOME frontend.
+#
+# Self-contained: every input is declared here, so this builds from a plain
+# checkout with no preparation steps -- which is also what makes it work
+# unchanged in GNOME Builder. The sandbox has no network during the build, so
+# anything this file does not declare is simply absent, which makes it the
+# strictest test of the clone-and-build promise in the whole project.
+#
+# TWO dependencies, both provisioned from the pins below exactly as
+# cmake/Dependencies.cmake pins them, so a flatpak build never depends on a
+# working checkout's state: MAME (the tschak909/mame fujinet-go-a7800 fork:
+# the a7800 driver with the FujiNet cartridge, built as libmame_fngo by its
+# own module) and fujinet-firmware.
+#
+# Build + install + run:
+#   flatpak-builder --user --install --force-clean build-flatpak \
+#       build-aux/flatpak/online.fujinet.go.atari7800.gnome.yml
+#   flatpak run online.fujinet.go.atari7800.gnome
+#
+app-id: online.fujinet.go.atari7800.gnome
+runtime: org.gnome.Platform
+runtime-version: '49'
+sdk: org.gnome.Sdk
+command: fujinet-go-atari7800-gnome
+
+finish-args:
+  - --share=ipc
+  - --share=network          # the FujiNet BoIP link + the loopback web UI
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --socket=pulseaudio      # SDL audio (PipeWire's Pulse interface)
+  - --device=all             # gamepad hotplug (hidraw/evdev)
+
+modules:
+  - name: sdl3
+    buildsystem: cmake-ninja
+    builddir: true
+    config-opts:
+      - -DCMAKE_BUILD_TYPE=Release
+      - -DSDL_STATIC=OFF
+      - -DSDL_TEST_LIBRARY=OFF
+    sources:
+      - type: git
+        url: https://github.com/libsdl-org/SDL.git
+        # keep in step with the SDL the CI jobs build
+        tag: release-3.4.12
+        commit: f87239e71e42da91ca317a12eefb82cfbf3393eb
+
+  # The FujiNet runtime's vendored build_webui.py imports PyYAML and Jinja2
+  # from whatever python3 tools/fujinet/build-fujinet-desktop.sh runs --
+  # every CI job's runner already has both system-wide, but org.gnome.Sdk's
+  # python3 has neither and the sandboxed build step can't pip install them
+  # (no network). Pre-built wheels, not sdists: PyYAML and MarkupSafe's C
+  # extensions need a build backend pip can't reach offline (jinja2's own
+  # backend, flit_core, isn't present either), and a wheel needs none --
+  # pip just unpacks it. Pinned to org.gnome.Sdk 49's python3 (3.13,
+  # confirmed from the sandbox's own traceback) x86_64 manylinux wheels;
+  # installed to a fixed, python-version-independent path so the
+  # fujinet-go-atari7800 module below can just PYTHONPATH at it.
+  - name: python3-fujinet-webui-deps
+    buildsystem: simple
+    build-commands:
+      - pip3 install --no-index --find-links="file://${PWD}"
+        --target=/app/fujinet-pyshims PyYAML==6.0.3 MarkupSafe==3.0.3 Jinja2==3.1.6
+    sources:
+      - type: file
+        url: https://files.pythonhosted.org/packages/74/27/e5b8f34d02d9995b80abcef563ea1f8b56d20134d8f4e5e81733b1feceb2/pyyaml-6.0.3-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl
+        sha256: 0f29edc409a6392443abf94b9cf89ce99889a1dd5376d94316ae5145dfedd5d6
+      - type: file
+        url: https://files.pythonhosted.org/packages/a9/21/9b05698b46f218fc0e118e1f8168395c65c8a2c750ae2bab54fc4bd4e0e8/markupsafe-3.0.3-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl
+        sha256: ccfcd093f13f0f0b7fdd0f198b90053bf7b2f02a3927a30e63f3ccc9df56b676
+      - type: file
+        url: https://files.pythonhosted.org/packages/62/a1/3d680cbfd5f4b8f15abc1d571870c5fc3e594bb582bc3b64ea099db13e56/jinja2-3.1.6-py3-none-any.whl
+        sha256: 85ece4451f492d0c13c5dd7c13a64681a86afae63a5f347908daf103ce6d2f67
+
+  # MAME's Atari 7800 with the FujiNet cartridge, as libmame_fngo: MAME's
+  # own make for the fngo target only (cmake/BuildMame.cmake runs the same
+  # command outside the sandbox). Its own module so flatpak-builder caches
+  # the long build and only re-runs it when the pin changes. Pinned exactly
+  # as cmake/Dependencies.cmake (MAME_COMMIT / MAME_ARCHIVE_SHA256).
+  - name: mame-fngo
+    buildsystem: simple
+    build-commands:
+      - make TARGET=fngo SUBTARGET=a7800 OSD=fngo BUILDDIR=build-fngo
+        NOWERROR=1 IGNORE_GIT=1 PYTHON_EXECUTABLE=python3
+        NO_USE_MIDI=1 NO_USE_PORTAUDIO=1 NO_USE_PULSEAUDIO=1 NO_USE_PIPEWIRE=1
+        NO_OPENGL=1 USE_QTDEBUG=0 SYMBOLS=0 OPTIMIZE=2 ARCHOPTS=-fPIC
+        -j${FLATPAK_BUILDER_N_JOBS}
+      - install -Dm755 build-fngo/fngo/libmame_fngo.so /app/lib/libmame_fngo.so
+      - install -Dm644 src/fngo/fngo_mame.h /app/include/fngo_mame.h
+    cleanup:
+      - /include
+    sources:
+      - type: archive
+        url: https://github.com/tschak909/mame/archive/99200eb847a1eb3bd6ae51a6d2d5555c8d06abd4.tar.gz
+        sha256: 75ed3d2d8abe658e244d86846628b5ba9a3cfe81089316f7d24459ead5adccb2
+
+  - name: fujinet-go-atari7800
+    buildsystem: cmake-ninja
+    builddir: true
+    build-options:
+      env:
+        PYTHONPATH: /app/fujinet-pyshims
+    config-opts:
+      - -DFRONTEND=gnome
+      # the mame-fngo module above
+      - -DMAME_FNGO_PREBUILT=/app
+    sources:
+      - type: dir
+        path: ../..
+        skip:
+          - .flatpak-builder
+          # Every build directory .gitignore's "build*/" covers. `type: dir`
+          # takes the working tree INCLUDING gitignored files, and skip does
+          # not glob, so each one has to be named -- build-kde was the one
+          # that was missing.
+          - build
+          - build-gnome
+          - build-kde
+          - build-win
+          - build-flatpak
+          - build-flatpak-kde
+          # The provisioned trees: they come from the pinned sources (MAME
+          # from its own module), so a local checkout's state cannot leak
+          # into a flatpak build.
+          - third_party/mame
+          - third_party/fujinet-firmware
+          - tools/fujinet/work
+      # Pinned exactly as cmake/Dependencies.cmake. a7800_provide_dependency()
+      # skips its own fetch once it finds build.sh (the SENTINEL) already here.
+      - type: git
+        url: https://github.com/FujiNetWIFI/fujinet-firmware
+        commit: c68e863034737611415ca568c3ea4607a2220c7e
+        dest: third_party/fujinet-firmware
+      # Same reasoning: the sandboxed build step has no network access, but
+      # tools/fujinet/build-fujinet-desktop.sh needs mbedTLS 3.x and
+      # org.gnome.Sdk ships none. Pinned to the exact tag/commit the script
+      # itself builds when it has to fetch mbedTLS live (ensure_mbedtls's
+      # MBEDTLS_TAG) -- ensure_mbedtls skips that fetch once it finds a
+      # checkout already here.
+      - type: git
+        url: https://github.com/Mbed-TLS/mbedtls.git
+        tag: mbedtls-3.6.5
+        commit: e185d7fd85499c8ce5ca2a54f5cf8fe7dbe3f8df
+        dest: tools/fujinet/work/mbedtls-src

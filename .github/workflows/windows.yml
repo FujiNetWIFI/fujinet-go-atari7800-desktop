@@ -1,0 +1,84 @@
+name: Windows
+
+# Native MSYS2/UCRT64: the core, the session layer, the FujiNet runtime, the
+# test suite and the Win32 frontend.
+#
+# MAME builds itself here as mame_fngo.dll (cmake/BuildMame.cmake runs its
+# own make under MSYS2, which MAME's build supports natively), and the
+# FujiNet cartridge's link is Winsock on this platform (ws2_32, wired into
+# the core CMakeLists).
+#
+# The mingw-w64 cross-compile in cmake/toolchains/ is the desk-side check for
+# all of this: the whole app cross-builds, its import table carries only
+# Windows system DLLs, and the tests pass under Wine. THIS workflow is the
+# real native build.
+#
+# Nothing copyrighted is embedded (no BIOS is needed; the only built-in
+# image is FujiNet's own CONFIG client). WITH_FUJINET is left at its
+# default ON to prove the MSYS2 runtime build works here -- the build script
+# has the cygpath/UTF-8/venv handling for it.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            git
+            make
+            patch
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-python
+            mingw-w64-ucrt-x86_64-sdl3
+
+      - name: Confirm the packaged SDL3 is on the 3.x line
+        run: pacman -Q mingw-w64-ucrt-x86_64-sdl3 | grep -qE ' 3\.[0-9]+\.[0-9]+-'
+
+      # MAME is the long pole (about nine hundred files): its pinned source
+      # and MAME's own objects are cached per pin, so later runs only relink.
+      - name: Restore MAME (source + objects)
+        id: mame-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            third_party/mame
+            build/mame
+          key: mame-windows-ucrt64-${{ hashFiles('cmake/Dependencies.cmake', 'cmake/BuildMame.cmake') }}
+
+      - name: Configure
+        run: cmake -B build -G Ninja
+
+      - name: Build
+        run: cmake --build build
+
+      # saved even when a later step fails: the MAME build is what is expensive
+      - name: Save MAME (source + objects)
+        if: always() && steps.mame-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            third_party/mame
+            build/mame
+          key: ${{ steps.mame-cache.outputs.cache-primary-key }}
+
+      - name: Test
+        working-directory: build
+        run: ctest --output-on-failure

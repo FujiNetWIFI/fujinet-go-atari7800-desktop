@@ -1,0 +1,110 @@
+name: macOS
+
+# Builds whatever exists for macOS -- the core, the session layer, the FujiNet
+# runtime, the full test suite, and the AppKit frontend -- on Apple Silicon.
+#
+# This is the ONLY place macOS is compiled: none of frontends/macos was
+# written on a Mac, and nothing on the development machine can build
+# Objective-C against Cocoa. A failure here is real signal about that code.
+#
+# Two legs, as the release ships: macos-latest is Apple Silicon (arm64),
+# macos-15-intel is Intel (x86_64).
+#
+# WITH_FUJINET is left at its default ON: tools/fujinet/build-fujinet-desktop.sh
+# has Darwin handling (libfujinet.dylib, and it builds mbedTLS 3.6.5 from
+# source because Homebrew's is 4.x, which drops the mbedtls/md5.h the
+# firmware includes).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-latest
+          - arch: x86_64
+            runner: macos-15-intel
+    runs-on: ${{ matrix.runner }}
+    env:
+      DYLD_LIBRARY_PATH: /tmp/sdl3-install/lib
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build tools
+        run: brew install cmake ninja python3
+
+      - name: Confirm the runner's architecture matches the matrix leg
+        run: |
+          test "$(uname -m)" = "${{ matrix.arch }}" \
+            || { echo "::error::runner is $(uname -m), expected ${{ matrix.arch }}"; exit 1; }
+
+      - name: Build and install SDL3 (release-3.4.12, pinned)
+        run: |
+          git clone --depth 1 --branch release-3.4.12 \
+            https://github.com/libsdl-org/SDL.git /tmp/sdl3-src
+          cmake -S /tmp/sdl3-src -B /tmp/sdl3-build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX=/tmp/sdl3-install \
+            -DSDL_SHARED=ON -DSDL_STATIC=OFF -DSDL_TEST_LIBRARY=OFF
+          cmake --build /tmp/sdl3-build
+          cmake --install /tmp/sdl3-build
+
+      # MAME is the long pole (about nine hundred files): its pinned source
+      # and MAME's own objects are cached per pin, so later runs only relink.
+      - name: Restore MAME (source + objects)
+        id: mame-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            third_party/mame
+            build/mame
+          key: mame-macos-${{ matrix.arch }}-${{ hashFiles('cmake/Dependencies.cmake', 'cmake/BuildMame.cmake') }}
+
+      # RelWithDebInfo rather than the default Release: same optimisation
+      # class, but a crash on a runner we cannot sit at gets line numbers.
+      - name: Configure
+        run: |
+          cmake -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_PREFIX_PATH=/tmp/sdl3-install
+
+      - name: Build
+        run: cmake --build build
+
+      # saved even when a later step fails: the MAME build is what is expensive
+      - name: Save MAME (source + objects)
+        if: always() && steps.mame-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            third_party/mame
+            build/mame
+          key: ${{ steps.mame-cache.outputs.cache-primary-key }}
+
+      - name: Test
+        working-directory: build
+        run: ctest --output-on-failure
+
+      # A crash on a Mac we cannot sit at is only diagnosable with a
+      # backtrace: re-run every failing test under lldb and print it.
+      - name: Backtraces for failed tests
+        if: failure()
+        working-directory: build
+        run: |
+          xcodebuild -version | head -1; uname -a
+          for t in $(ctest -N | sed -n 's/^ *Test *#[0-9]*: *//p'); do
+            exe=$(ctest -V -R "^$t$" -N 2>/dev/null | sed -n 's/^[0-9]*: Test command: *//p' | head -1 | tr -d '"')
+            [ -x "$exe" ] || continue
+            echo "=== $t ($exe) ==="
+            # (no coreutils `timeout` on macOS; the crashes are immediate)
+            lldb --batch \
+              -o "settings set target.env-vars DYLD_LIBRARY_PATH=/tmp/sdl3-install/lib" \
+              -o "run" -o "bt all" -o "register read" -o "quit" -- "$exe" 2>&1 | tail -120 || true
+          done

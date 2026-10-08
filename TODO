@@ -1,0 +1,94 @@
+fujinet-go-atari7800-desktop -- milestone log
+=============================================
+
+The plan is the family's (see fujinet-go-adam-desktop/PORTING.md): one C API
+in core/, four native frontends, FujiNet in-process, one shared settings
+store, a native debugger everywhere, no panels visible at startup,
+clone-and-build CI. Nothing below is marked done on "it compiles".
+
+M0  scaffold                                                          [x]
+  [x] carried from fujinet-go-nes-desktop (core, frontends, CI, packaging)
+      and fujinet-go-sms-desktop (BIOS import, roms.c, embed-roms.py)
+  [x] identity: online.fujinet.go.atari7800.*, BoIP 11510 / web UI 11511,
+      accent and icon background #F0932F (the 2600's mark, inverted)
+  [x] cmake/Dependencies.cmake: MAME as the fork's pinned source archive
+      (SHA-256 checked), fujinet-firmware c68e8630; MAME_SRC / FUJINET_SRC
+  [x] tools/fujinet patch 0002: .a78 is a ROM image CONFIG can push
+
+M1  the FujiNet cartridge in MAME (tschak909/mame fujinet-go-a7800)   [x]
+  [x] graft from fujinet-firmware add-atari7800 03b925719 (apply.sh), with
+      FUJINET_SOURCES (per-file SHA-256) and fujinet_sync.sh
+  [x] mailbox service on a worker thread (the cart's core0), publish
+      shadow with ACKSEQ last, loads behind a mutex, sync before SWAP
+  [x] fujilink: POSIX + Winsock, non-blocking, redials
+  [x] "none" BIOS for a7800 and a7800p; no-BIOS forces DIRECT hand-over
+  [x] staged / direct boots of a host image; the High Score Cart
+
+M2  libmame_fngo                                                      [x]
+  [x] STANDALONE target fngo (a7800, a7800p only), headless OSD keeping a
+      render target live, frames via the screen bitmap + adjusted palette,
+      48 kHz stereo, throttle off (the host paces)
+  [x] fngo_mame.h C API: lifecycle, input, the FujiNet cart, images/plans,
+      the debugger engine (registers, disassembly, breakpoints,
+      watchpoints, console, views), state; exports only fngo_mame_*
+      (version script / export list / dllexport); mame_exports test
+  [x] builds with MAME's own make from CMake (cmake/BuildMame.cmake);
+      MinGW cross build of mame_fngo.dll
+
+M3  core                                                              [x]
+  [x] MameHost: emulation thread, vsync phase lock / wall-clock pacing,
+      adaptive audio resampler, input diffing onto ioports, jobs on the
+      emulation thread, cartridge watch for AUTO controllers
+  [x] session: no-BIOS boot, staged Open Cartridge, power cycle, Reboot to
+      CONFIG, region from header / DB, BIOS per console with fallback to
+      none, HSC, console switches, difficulty persistence, light-gun pointer
+  [x] media: .a78/.bin/.zip/.7z, BIOS/HSC recognised by CRC whatever the
+      name, SD import unpacks
+  [x] tests: session, bindings, media, gamepad, debug, fujibus_smoke,
+      netboot (A7800_TESTROM_DIR), headless_{config,staged,direct,pal},
+      mame_exports, no_embedded_roms_*
+
+M4  debugger                                                          [x]
+  [x] a7800debug over MAME's engine: attach/stop/step/over/out/frame/run
+      to, MARIA, I/O, cartridge, breakpoints + watchpoints, symbols,
+      refused commands (state save/load, hardreset, exit)
+
+M5  ROM sweep (tools/romsweep)                                        [x]
+  [x] 114 games of a 116-file No-Intro set: no BIOS, BIOS staged/direct,
+      network boot all pass; BIOS boot == stock MAME pixel for pixel
+      (5 titles stock MAME itself garbles, checked by hand); BIOS-less and
+      network boots line up with the BIOS boot (attract-mode divergences
+      checked by hand). REPORT.md committed.
+
+M6  light gun                                                         [x]
+  [x] XG-1 in a7800.cpp: CONTROLLERS per port, trigger on Up, sensor on
+      INPT4/5, the TIA-cycle penalty with a gun attached
+  [x] calibrated against Barnyard Blaster's bullet holes and Meltdown's
+      buttons, NTSC and PAL; the five gun titles auto-detected by CRC
+  [ ] played by hand with a mouse in each frontend
+
+M7  GNOME + KDE                                                       [x]
+  [x] menus, Preferences, Controllers (two ProLine pads, console switches,
+      Map), debugger (7 tabs), light-gun crosshair + pointer, drag & drop,
+      status line; A7800_SCREENSHOT hook; desktop/metainfo validated
+  [x] smoke-run headless (Broadway, Qt offscreen), every window captured
+  [ ] hand checklist on a real desktop (input, Map, drag & drop, dialogs)
+
+M8  Windows + macOS                                                   [~]
+  [x] Win32 port; cross-builds with mame_fngo.dll; imports system-only
+  [x] AppKit port (A7800* classes), libmame_fngo.dylib in Frameworks
+  [ ] first native MSYS2 build (CI); first macOS build (CI, arm64 + x86_64)
+  [ ] a look on real Windows and macOS desktops
+
+M9  packaging and release                                             [~]
+  [x] Flatpaks with a mame-fngo module; CPack DEB/RPM/TGZ carrying
+      libmame_fngo; NSIS + portable zip with mame_fngo.dll; macOS zips
+      for both architectures, Frameworks signed
+  [x] CI caches MAME's source and objects per pin
+  [ ] CI green everywhere; tag v0.1.0 -> draft release with every asset
+
+Later
+  [ ] paddles (no 7800 title needs them)
+  [ ] MAME's own cart boards as a fallback for images the FujiNet cart
+      refuses (XM, XBoard, Versaboard, Megacart)
+  [ ] drop patch 0002 once the firmware pin carries .a78 as a ROM type

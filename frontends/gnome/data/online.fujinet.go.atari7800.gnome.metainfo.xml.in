@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>online.fujinet.go.atari7800.gnome</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <name>FujiNet Go Atari 7800</name>
+  <summary>An Atari 7800 with a built-in FujiNet</summary>
+  <description>
+    <p>
+      A self-contained Atari 7800 with a FujiNet built in: browse a network
+      host from the console, boot games over the network, and let a FujiNet
+      program keep talking to the network, all in one application.
+    </p>
+    <p>
+      The emulator is MAME's Atari 7800, with the FujiNet cartridge running
+      the real cartridge firmware's own protocol and loader. FujiNet's CONFIG
+      program is built in and starts at power-on; local .a78 cartridge images
+      (or archives holding one) can be opened in its place, and boot through
+      the cartridge exactly as a network boot does.
+    </p>
+    <p>
+      No BIOS is needed: the console starts the cartridge directly. Your own
+      NTSC or PAL BIOS can be imported and chosen per console, and a High
+      Score Cart ROM adds high scores to the games that keep them.
+    </p>
+    <p>
+      Both ProLine joysticks are on screen, gamepads are picked up as they
+      are plugged in and out, the mouse aims the XG-1 light gun, and a native
+      debugger shows the 6502, disassembly with breakpoints and watchpoints,
+      MARIA, the TIA, RIOT and POKEY, and the FujiNet cartridge.
+    </p>
+    <p>
+      Nothing copyrighted is included: the only built-in program is
+      FujiNet's own CONFIG client.
+    </p>
+  </description>
+  <launchable type="desktop-id">online.fujinet.go.atari7800.gnome.desktop</launchable>
+  <url type="homepage">https://fujinet.online/</url>
+  <url type="bugtracker">https://github.com/FujiNetWIFI/fujinet-go-atari7800-desktop/issues</url>
+  <developer id="online.fujinet">
+    <name>Thomas Cherryhomes</name>
+  </developer>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <!-- The CURRENT release templates its version from @PROJECT_VERSION@, so
+         it cannot disagree with the tree; past releases are literal. The
+         release job checks that this first entry is still a template. -->
+    <release version="@PROJECT_VERSION@" date="2026-10-08">
+      <description>
+        <p>
+          First release: MAME's Atari 7800 with the FujiNet cartridge, no
+          BIOS needed, an in-process FujiNet, native GNOME, KDE, macOS and
+          Windows frontends, both joysticks on screen, the XG-1 light gun,
+          hotplugged gamepads and a native debugger.
+        </p>
+      </description>
+    </release>
+  </releases>
+</component>
