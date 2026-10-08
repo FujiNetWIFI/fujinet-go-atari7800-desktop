@@ -152,11 +152,19 @@ endif()
 function(a7800_link_mame target)
   target_link_libraries(${target} PRIVATE mame_fngo)
   add_dependencies(${target} mame-fngo)
-  if(APPLE)
+  if(WIN32)
+    # Windows has no RPATH: the loader looks beside the .exe, so every
+    # executable that links the DLL (the frontend, the tests, the headless
+    # runner) gets a copy there in the build tree.
+    add_custom_command(TARGET ${target} POST_BUILD
+      COMMAND ${CMAKE_COMMAND} -E copy_if_different
+              "${MAME_FNGO_LIBRARY}" "$<TARGET_FILE_DIR:${target}>"
+      VERBATIM)
+  elseif(APPLE)
     set_target_properties(${target} PROPERTIES
       BUILD_RPATH "${MAME_FNGO_DIR}"
       INSTALL_RPATH "@executable_path/../Frameworks")
-  elseif(NOT WIN32)
+  else()
     set_target_properties(${target} PROPERTIES
       BUILD_RPATH "${MAME_FNGO_DIR}"
       INSTALL_RPATH "$ORIGIN/../${CMAKE_INSTALL_LIBDIR}/fujinet-go-atari7800")

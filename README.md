@@ -193,8 +193,9 @@ Every control is remappable in the Controllers window.
   network; the BIOS boot matches stock MAME pixel for pixel at frame 900
   (98 automatically; for the other 5, stock MAME's own cartridge garbles
   the game and ours shows it correctly), and the BIOS-less and network boots
-  replay the BIOS boot's frames (the rest checked by eye: the same game at
-  another point of an attract mode). See `tools/romsweep/REPORT.md`.
+  of the 104 joystick games replay the BIOS boot's frames (the rest checked
+  by eye: the same game at another point of an attract mode). See
+  `tools/romsweep/REPORT.md`.
 - **The light gun** — calibrated and checked against Barnyard Blaster
   (bullet holes land on the aim, NTSC and PAL) and Meltdown (every button
   answers exactly where it is drawn, NTSC and PAL).

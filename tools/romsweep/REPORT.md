@@ -7,22 +7,22 @@
 | nobios | no BIOS, staged (Open Cartridge's default) | 114 / 114 |
 | staged | the real BIOS, staged | 114 / 114 |
 | direct | the real BIOS, in SRAM from power-on | 114 / 114 |
-| seq | nobios's last 300 frames are direct's, shifted by the BIOS's running time | 114 / 114 (16 checked by hand †) |
+| seq | nobios's last 300 frames are direct's, shifted by the BIOS's running time | 104 / 104 (16 checked by hand †) |
 | ab | direct vs stock MAME's own cartridge, pixel for pixel at frame 900 | 103 / 103 (5 checked by hand †) |
 | network | network boot: fujiboot mounts it from fujinet-pc's SD | 114 / 114 |
-| netseq | network's last 300 frames are direct's, shifted | 114 / 114 (23 checked by hand †) |
+| netseq | network's last 300 frames are direct's, shifted | 104 / 104 (23 checked by hand †) |
 
 | Cartridge | CRC | Kind | TV | Controllers | nobios | staged | direct | seq | ab | network | netseq |
 |---|---|---|---|---|---|---|---|---|---|---|---|
 | Ace of Aces (Europe) | 20C5DB80 | a78_sg | PAL | joy / none | ok | ok | ok | ok | ok | ok | ok |
 | Ace of Aces (USA) | 05A2B94C | a78_sg | NTSC | joy / joy | ok | ok | ok | ok | ok | ok | ok |
-| Alien Brigade (Europe) | 6A19F0FE | a78_sg9 | PAL | joy / none (gun) | ok | ok | ok | ok | — | ok | ok |
-| Alien Brigade (USA) | C8849D36 | a78_sg9 | NTSC | paddle / paddle (gun) | ok | ok | ok | ok | — | ok | ok |
+| Alien Brigade (Europe) | 6A19F0FE | a78_sg9 | PAL | joy / none (gun) | ok | ok | ok | n/a: shots timed by frame | — | ok | n/a: shots timed by frame |
+| Alien Brigade (USA) | C8849D36 | a78_sg9 | NTSC | paddle / paddle (gun) | ok | ok | ok | n/a: shots timed by frame | — | ok | n/a: shots timed by frame |
 | Asteroids (USA) | DFB93F40 | a78_rom | NTSC | joy / joy | ok | ok | ok | ok† | ok | ok | ok† |
 | Ballblazer (Europe) | AFF85565 | a78_pokey | PAL | joy / joy | ok | ok | ok | ok | ok | ok | ok |
 | Ballblazer (USA) | A4C4808B | a78_pokey | NTSC | joy / joy | ok | ok | ok | ok | ok | ok | ok |
-| Barnyard Blaster (Europe) | 02764A86 | a78_sg | PAL | gun / none (gun) | ok | ok | ok | ok | — | ok | ok |
-| Barnyard Blaster (USA) | ED0A587D | a78_sg | NTSC | joy / joy (gun) | ok | ok | ok | ok | — | ok | ok |
+| Barnyard Blaster (Europe) | 02764A86 | a78_sg | PAL | gun / none (gun) | ok | ok | ok | n/a: shots timed by frame | — | ok | n/a: shots timed by frame |
+| Barnyard Blaster (USA) | ED0A587D | a78_sg | NTSC | joy / joy (gun) | ok | ok | ok | n/a: shots timed by frame | — | ok | n/a: shots timed by frame |
 | Baseball (Europe) | 68D48FDC | a78_rom | PAL | joy / joy | ok | ok | ok | ok | ok | ok | ok |
 | Basketbrawl (Europe) | A4265D4B | a78_sg | PAL | joy / joy | ok | ok | ok | ok | ok | ok | ok |
 | Basketbrawl (USA) | C8B9D7B5 | a78_sg | NTSC | joy / joy | ok | ok | ok | ok | ok | ok | ok |
@@ -34,8 +34,8 @@
 | Commando (USA) | CD1A98C5 | a78_sg_pokey | NTSC | joy / joy | ok | ok | ok | ok | ok | ok | ok |
 | Crack'ed (Europe) | 50FD19CB | a78_sg | PAL | joy / none | ok | ok | ok | ok | ok | ok | ok |
 | Crack'ed (USA) | E645FD1F | a78_sg | NTSC | joy / joy | ok | ok | ok | ok | ok | ok | ok |
-| Crossbow (Europe) | E93D8894 | a78_sg9 | PAL | joy / none (gun) | ok | ok | ok | ok | — | ok | ok |
-| Crossbow (USA) | D2EA5686 | a78_sg9 | NTSC | paddle / paddle (gun) | ok | ok | ok | ok | — | ok | ok |
+| Crossbow (Europe) | E93D8894 | a78_sg9 | PAL | joy / none (gun) | ok | ok | ok | n/a: shots timed by frame | — | ok | n/a: shots timed by frame |
+| Crossbow (USA) | D2EA5686 | a78_sg9 | NTSC | paddle / paddle (gun) | ok | ok | ok | n/a: shots timed by frame | — | ok | n/a: shots timed by frame |
 | Dark Chambers (Europe) | C93A563E | a78_sg | PAL | joy / joy | ok | ok | ok | ok† | ok | ok | ok† |
 | Dark Chambers (USA) | 366777F1 | a78_sg | NTSC | joy / joy | ok | ok | ok | ok† | ok | ok | ok† |
 | Desert Falcon (Europe) | 33991EE8 | a78_rom | PAL | joy / joy | ok | ok | ok | ok | ok | ok | ok† |
@@ -79,8 +79,8 @@
 | Mat Mania Challenge (USA) | ABA91829 | a78_sg | NTSC | joy / joy | ok | ok | ok | ok | ok | ok | ok |
 | Mean 18 Ultimate Golf (Europe) | 3CEC4BE8 | a78_sg | PAL | joy / joy | ok | ok | ok | ok | ok | ok | ok |
 | Mean 18 Ultimate Golf (USA) | CF21D9AC | a78_sg | NTSC | joy / joy | ok | ok | ok | ok | ok | ok | ok |
-| Meltdown (Europe) | 177FC850 | a78_sg | PAL | gun / none (gun) | ok | ok | ok | ok | — | ok | ok |
-| Meltdown (USA) | 4A8F2171 | a78_sg | NTSC | gun / gun (gun) | ok | ok | ok | ok | — | ok | ok |
+| Meltdown (Europe) | 177FC850 | a78_sg | PAL | gun / none (gun) | ok | ok | ok | n/a: shots timed by frame | — | ok | n/a: shots timed by frame |
+| Meltdown (USA) | 4A8F2171 | a78_sg | NTSC | gun / gun (gun) | ok | ok | ok | n/a: shots timed by frame | — | ok | n/a: shots timed by frame |
 | Midnight Mutants (Europe) | 7CA6D521 | a78_sg | PAL | joy / none | ok | ok | ok | ok | ok | ok | ok |
 | Midnight Mutants (USA) | 187EC84E | a78_sg | NTSC | joy / joy | ok | ok | ok | ok | ok | ok | ok |
 | Missing In Action (Unknown) (Proto) | FF7A4C60 | a78_sg9 | NTSC | joy / joy | ok | ok | ok | ok | ok | ok | ok |
@@ -106,8 +106,8 @@
 | Robotron - 2084 (USA) | CB22305D | a78_rom | NTSC | joy / joy | ok | ok | ok | ok† | ok | ok | ok† |
 | Scrapyard Dog (Europe) | 46DD9662 | a78_sg | PAL | joy / none | ok | ok | ok | ok† | ok | ok | ok† |
 | Scrapyard Dog (USA) | 5CC8C34F | a78_sg | NTSC | joy / joy | ok | ok | ok | ok† | ok | ok | ok† |
-| Sentinel (Europe) | 47340DF9 | a78_sg | PAL | gun / none (gun) | ok | ok | ok | ok | — | ok | ok |
-| Sentinel (USA) (Proto) | 2FDDAD78 | a78_sg | NTSC | joy / joy (gun) | ok | ok | ok | ok | — | ok | ok |
+| Sentinel (Europe) | 47340DF9 | a78_sg | PAL | gun / none (gun) | ok | ok | ok | n/a: shots timed by frame | — | ok | n/a: shots timed by frame |
+| Sentinel (USA) (Proto) | 2FDDAD78 | a78_sg | NTSC | joy / joy (gun) | ok | ok | ok | n/a: shots timed by frame | — | ok | n/a: shots timed by frame |
 | Sirius (Unknown) (Proto) | 65AE616E | a78_sg_ram | NTSC | joy / joy | ok | ok | ok | ok | ok | ok | ok |
 | Summer Games (USA) | 65C6DF3F | a78_sg_ram | NTSC | joy / joy | ok | ok | ok | ok† | ok† | ok | ok |
 | Super Huey UH-IX (Europe) | 6B27EA2C | a78_rom | PAL | joy / none | ok | ok | ok | ok | ok | ok | ok† |
@@ -176,6 +176,7 @@
 - Scrapyard Dog (USA) (netseq): the same game, at another point of an attract mode that start-up timing randomises
 - Super Huey UH-IX (Europe) (netseq): the same game, at another point of an attract mode that start-up timing randomises
 
-Light-gun titles are aimed at the middle of the screen with the trigger pulled once a second;
-reaching an animated title or attract screen is their pass. They are left out of the A/B
-comparison: stock MAME's a7800 has no light gun.
+Light-gun titles get the XG-1 on both ports, aimed at the middle of the screen with the
+trigger pulled once a second; booting to their title or game is their pass. They are left out
+of the A/B comparison (stock MAME's a7800 has no light gun) and of the frame-by-frame ones
+(the shots are timed by frame number, so a boot without the BIOS meets them at other moments).
