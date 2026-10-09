@@ -74,18 +74,21 @@ M7  GNOME + KDE                                                       [x]
   [x] smoke-run headless (Broadway, Qt offscreen), every window captured
   [ ] hand checklist on a real desktop (input, Map, drag & drop, dialogs)
 
-M8  Windows + macOS                                                   [~]
+M8  Windows + macOS                                                   [x]
   [x] Win32 port; cross-builds with mame_fngo.dll; imports system-only
   [x] AppKit port (A7800* classes), libmame_fngo.dylib in Frameworks
-  [ ] first native MSYS2 build (CI); first macOS build (CI, arm64 + x86_64)
+  [x] native MSYS2 build and tests in CI (fujibus_smoke against a native
+      FujiNet included); macOS arm64 + x86_64 build and tests in CI
   [ ] a look on real Windows and macOS desktops
 
-M9  packaging and release                                             [~]
+M9  packaging and release                                             [x]
   [x] Flatpaks with a mame-fngo module; CPack DEB/RPM/TGZ carrying
       libmame_fngo; NSIS + portable zip with mame_fngo.dll; macOS zips
       for both architectures, Frameworks signed
   [x] CI caches MAME's source and objects per pin
-  [ ] CI green everywhere; tag v0.1.0 -> draft release with every asset
+  [x] CI green everywhere; v0.1.0 tagged -> draft release with all 12
+      assets (DEB/RPM/TGZ x2, two Flatpaks, NSIS + zip, macOS x2)
+  [ ] publish the draft after the hand checks above
 
 Later
   [ ] paddles (no 7800 title needs them)
