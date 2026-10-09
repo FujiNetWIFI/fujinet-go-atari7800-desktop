@@ -116,20 +116,12 @@ jobs:
             build/mame
           key: mame-linux-x64-${{ hashFiles('cmake/Dependencies.cmake', 'cmake/BuildMame.cmake') }}
 
-      - name: Restore MAME (source + objects) from the push-CI cache
-        uses: actions/cache/restore@v4
-        with:
-          path: |
-            third_party/mame
-            build/mame
-          key: mame-macos-${{ matrix.arch }}-${{ hashFiles('cmake/Dependencies.cmake', 'cmake/BuildMame.cmake') }}
-
       - name: Configure
         run: |
           cmake -B build -G Ninja \
-            -DCMAKE_PREFIX_PATH=/tmp/sdl3-install
+            -DCMAKE_PREFIX_PATH=/tmp/sdl3-install \
             -DCMAKE_INSTALL_PREFIX=/usr \
-            -DFRONTEND=${{ matrix.frontend }} \
+            -DFRONTEND=${{ matrix.frontend }}
 
       - name: Build
         run: cmake --build build
@@ -160,9 +152,9 @@ jobs:
       - name: Verify the packages carry libmame_fngo
         working-directory: build
         run: |
-          dpkg-deb -c *.deb | grep -q 'lib/fujinet-go-atari7800/libmame_fngo.so' \
+          dpkg-deb -c *.deb | grep -q 'fujinet-go-atari7800/libmame_fngo.so' \
             || { echo "::error::libmame_fngo.so missing from the .deb"; exit 1; }
-          rpm -qlp *.rpm | grep -q 'lib/fujinet-go-atari7800/libmame_fngo.so' \
+          rpm -qlp *.rpm | grep -q 'fujinet-go-atari7800/libmame_fngo.so' \
             || { echo "::error::libmame_fngo.so missing from the .rpm"; exit 1; }
 
       - uses: actions/upload-artifact@v4
@@ -296,7 +288,7 @@ jobs:
             imports=$(objdump -p "$f" | sed -n 's/^\s*DLL Name: //p' | sort -u)
             echo "$imports"
             bad=$(echo "$imports" | grep -ivE \
-              '^(api-ms-win-[a-z0-9el-]+|mame_fngo|kernel32|user32|gdi32|advapi32|shell32|ole32|oleaut32|comctl32|comdlg32|imm32|winmm|version|setupapi|dwmapi|ws2_32|iphlpapi|bcrypt|crypt32|secur32|netapi32|userenv|dbghelp|shlwapi|msvcrt|ucrtbase|rpcrt4|winspool|uxtheme|hid|cfgmgr32|powrprof|avrt|dxgi|d3d11|opengl32)\.dll$' \
+              '^(api-ms-win-[a-z0-9el-]+|mame_fngo|kernel32|user32|gdi32|advapi32|shell32|ole32|oleaut32|comctl32|comdlg32|imm32|winmm|version|setupapi|dwmapi|ws2_32|wsock32|iphlpapi|bcrypt|crypt32|secur32|netapi32|userenv|dbghelp|shlwapi|msvcrt|ucrtbase|rpcrt4|winspool|uxtheme|hid|cfgmgr32|powrprof|avrt|dxgi|d3d11|opengl32)\.dll$' \
               || true)
             if [ -n "$bad" ]; then
               echo "::error::$f imports non-system DLLs that are not shipped:"
@@ -392,10 +384,18 @@ jobs:
           cmake --build /tmp/sdl3-build
           sudo cmake --install /tmp/sdl3-build
 
+      - name: Restore MAME (source + objects) from the push-CI cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            third_party/mame
+            build/mame
+          key: mame-macos-${{ matrix.arch }}-${{ hashFiles('cmake/Dependencies.cmake', 'cmake/BuildMame.cmake') }}
+
       - name: Configure
         run: |
           cmake -B build -G Ninja \
-            -DCMAKE_PREFIX_PATH=/tmp/sdl3-install \
+            -DCMAKE_PREFIX_PATH=/tmp/sdl3-install
 
       - name: Build
         run: cmake --build build
