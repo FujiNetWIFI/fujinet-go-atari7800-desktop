@@ -88,7 +88,7 @@ M9  packaging and release                                             [x]
   [x] CI caches MAME's source and objects per pin
   [x] CI green everywhere; v0.1.0 tagged -> draft release with all 12
       assets (DEB/RPM/TGZ x2, two Flatpaks, NSIS + zip, macOS x2)
-  [ ] publish the draft after the hand checks above
+  [x] v0.1.0 published 2026-10-09, after a hand check on the desktop
 
 Later
   [ ] paddles (no 7800 title needs them)
