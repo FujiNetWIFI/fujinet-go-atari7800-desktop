@@ -182,6 +182,27 @@ void a7800debug_cart_get(a7800debug *d, a7800debug_cart *out);
 /* One line: "FujiNet cartridge: game (a78_sg, CRC 12345678), link up". */
 int  a7800debug_cart_info(a7800debug *d, char *dst, int dstsz);
 
+/* ---- FujiNet: the cartridge's link, as FujiBus packets -------------------------- */
+/* Traced from session start, debugger or not. The newest 512 are kept, and
+ * byte-identical exchanges in a row (a poll and its reply, again and
+ * again) are one entry with a repeat count. */
+#define A7800DEBUG_FUJI_TRACE_MAX 512
+typedef struct {
+    uint64_t serial;
+    int      to_host;       /* 1: FujiNet -> 7800, 0: 7800 -> FujiNet */
+    int      device, command, length;   /* from the FujiBus header, -1 if short */
+    int      nbytes;
+    uint32_t repeat;        /* how many in a row, 1 for one */
+    uint8_t  data[64];      /* the decoded packet's first bytes */
+    char     text[96];      /* "7800 -> FujiNet 70 E8 GET ADAPTERCONFIG (6 bytes) x3" */
+} a7800debug_fuji_packet;
+/* The newest `max` packets, oldest first. Returns the count. */
+int  a7800debug_fujinet_trace(a7800debug *d, a7800debug_fuji_packet *out, int max);
+void a7800debug_fujinet_trace_clear(a7800debug *d);
+/* The cartridge's link to FujiNet (link, mailbox service, mode, queue) as
+ * text lines. Returns length. */
+int  a7800debug_fujinet_state(a7800debug *d, char *dst, int dstsz);
+
 /* ---- breakpoints and watchpoints ------------------------------------------------ */
 typedef enum { A7800DEBUG_BP_EXEC = 1, A7800DEBUG_BP_READ = 2, A7800DEBUG_BP_WRITE = 4 } a7800debug_bp_type;
 typedef struct {

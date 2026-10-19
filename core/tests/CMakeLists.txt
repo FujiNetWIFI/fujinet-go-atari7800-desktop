@@ -64,8 +64,9 @@ a7800_link_mame(media_test)
 add_test(NAME media COMMAND media_test)
 
 # The real in-process FujiNet: brings libfujinet up on its port, boots the
-# CONFIG client and confirms the cartridge's link came up. SKIPs (77) when
-# the runtime was not built (-DWITH_FUJINET=OFF). Serial: it owns the port.
+# CONFIG client, confirms the cartridge's link came up and the debugger's
+# FujiNet trace saw both ways. SKIPs (77) when the runtime was not built
+# (-DWITH_FUJINET=OFF). Serial: it owns the port.
 add_executable(fujibus_smoke fujibus_smoke.c)
 target_link_libraries(fujibus_smoke PRIVATE a7800_session)
 a7800_link_mame(fujibus_smoke)
@@ -101,3 +102,12 @@ add_test(NAME debug COMMAND debug_test)
 set_tests_properties(debug PROPERTIES TIMEOUT 120)
 
 endif()
+
+# The debugger's FujiNet trace decoder, pure: made-up SLIP frames both ways,
+# whole and in pieces, repeats folded, the ring's limit. No MAME, no SDL.
+add_executable(fujitrace_test fujitrace_test.c "${CMAKE_SOURCE_DIR}/core/src/fujitrace.cpp")
+target_include_directories(fujitrace_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/core/src" "${CMAKE_SOURCE_DIR}/core/include")
+find_package(Threads REQUIRED)
+target_link_libraries(fujitrace_test PRIVATE Threads::Threads)
+add_test(NAME fujitrace COMMAND fujitrace_test)

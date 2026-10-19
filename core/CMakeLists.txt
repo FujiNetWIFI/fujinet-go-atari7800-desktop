@@ -81,7 +81,8 @@ set(A7800_SESSION_C_SOURCES
   "${A7800_ROMS_C}")
 set(A7800_SESSION_CXX_SOURCES
   src/session.cpp
-  src/debug.cpp)
+  src/debug.cpp
+  src/fujitrace.cpp)
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/gamepad_sdl.c")
   list(APPEND A7800_SESSION_C_SOURCES src/gamepad_sdl.c)
 else()

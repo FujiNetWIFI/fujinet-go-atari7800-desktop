@@ -66,6 +66,9 @@ public:
 		std::string bootMapper;
 		std::vector<uint8_t> hscRom;
 		bool hscOn = false;
+		// every frame on the cartridge's link (its worker thread), or none
+		fngo_mame_fujinet_trace_fn fujinetTrace = nullptr;
+		void* fujinetTraceUser = nullptr;
 	};
 
 	struct Callbacks

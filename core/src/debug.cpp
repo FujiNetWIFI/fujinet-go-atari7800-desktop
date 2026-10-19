@@ -7,8 +7,9 @@
  * evaluator, the disassembler and its command console. What lives here is
  * what the family's debugger windows want that MAME does not keep: labels
  * from a symbol file (also fed to MAME's expressions), the stop reason,
- * MARIA's and the I/O chips' registers gathered into structs, and the
- * family's own prompt commands.
+ * MARIA's and the I/O chips' registers gathered into structs, the
+ * family's own prompt commands, and the FujiNet trace (fujitrace.h), fed by
+ * libmame_fngo's hook from session start.
  *
  * Copyright (C) 2026 Thomas Cherryhomes
  * SPDX-License-Identifier: GPL-3.0-or-later
@@ -28,6 +29,7 @@
 
 extern "C" {
 #include "a7800debug.h"
+#include "fujitrace.h"
 #include "session_internal.h"
 }
 
@@ -57,6 +59,7 @@ struct a7800debug
 	uint32_t console_seq = 0;      // the console's lines already handed out
 	uint32_t palette[256] = {};
 	bool palette_valid = false;
+	fujitrace* fuji = fujitrace_new();
 };
 
 namespace {
@@ -112,8 +115,17 @@ extern "C" a7800debug* a7800debug_get(a7800session* s)
 
 void a7800debug_destroy(a7800session* s)
 {
-	delete static_cast<a7800debug*>(s->debugger);
+	a7800debug* d = static_cast<a7800debug*>(s->debugger);
+	if(d) fujitrace_free(d->fuji);
+	delete d;
 	s->debugger = nullptr;
+}
+
+// libmame_fngo's FujiNet trace hook (the cartridge's worker thread); the
+// session installs it with the debugger as `user`.
+void a7800debug_fujinet_tap(void* user, int dir, const uint8_t* raw, size_t len)
+{
+	fujitrace_feed(static_cast<a7800debug*>(user)->fuji, dir, raw, len);
 }
 
 // The emulation thread: the debugger has just stopped the machine. MAME
@@ -715,6 +727,53 @@ extern "C" int a7800debug_cart_info(a7800debug* d, char* dst, int dstsz)
 	         c.kind[0] ? " (" : "", c.kind, c.kind[0] ? (std::string(", CRC ") + hex(c.live_crc, 8) + ")").c_str() : "",
 	         c.tv ? "PAL" : "NTSC", c.link_up ? "up" : "down");
 	return put(dst, dstsz, buf);
+}
+
+// ---- FujiNet: the cartridge's link ----------------------------------------------------------
+
+extern "C" int a7800debug_fujinet_trace(a7800debug* d, a7800debug_fuji_packet* out, int max)
+{
+	return d ? fujitrace_get(d->fuji, out, max) : 0;
+}
+
+extern "C" void a7800debug_fujinet_trace_clear(a7800debug* d)
+{
+	if(d) fujitrace_clear(d->fuji);
+}
+
+extern "C" int a7800debug_fujinet_state(a7800debug* d, char* dst, int dstsz)
+{
+	if(!d || !d->session->running) return put(dst, dstsz, "The console is off\n");
+	a7800debug_cart c;
+	a7800debug_cart_get(d, &c);
+	char buf[1024];
+	snprintf(buf, sizeof buf,
+	         "FujiNet     %s\n"
+	         "BoIP        127.0.0.1:%d\n",
+	         d->session->fujinet_running ? "running" : "off", A7800SESSION_BOIP_PORT);
+	std::string s = buf;
+	if(!c.present) return put(dst, dstsz, s + "Cartridge   not running\n");
+	const std::string mode = c.mode == 1 ? "loading " + std::to_string(c.load_pct) + "%" : c.mode_name;
+	snprintf(buf, sizeof buf,
+	         "Link        %s\n"
+	         "%s%s"
+	         "Mailbox     %s\n"
+	         "Queue       %u\n"
+	         "ACKSEQ      $%02X\n"
+	         "Last error  %u\n"
+	         "Mode        %s\n"
+	         "Image       %s\n"
+	         "Mapper      %s\n"
+	         "CRC         %08X\n"
+	         "Boot        state $%02X, %u%%\n"
+	         "Boot error  %u\n",
+	         c.link_up ? "up" : "down",
+	         c.link_error[0] ? c.link_error : "", c.link_error[0] ? "\n" : "",
+	         c.worker ? "served" : "not served", c.queue_depth,
+	         c.ackseq, c.last_error, mode.c_str(),
+	         c.booted_image ? "a game" : "CONFIG", c.kind[0] ? c.kind : "-", c.live_crc,
+	         c.boot_state, c.boot_pct, c.boot_err);
+	return put(dst, dstsz, s + buf);
 }
 
 // ---- breakpoints and watchpoints -------------------------------------------------------------

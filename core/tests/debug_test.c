@@ -2,8 +2,8 @@
  * debug_test -- the debugger contract against a running machine: attach
  * stops it, registers, step / over / out / run to, disassembly with the PC
  * line, breakpoints and watchpoints that hit, memory, MARIA, the I/O view,
- * the cartridge tab, the prompt (and the commands it refuses), saving, and
- * detach lets it run again.
+ * the cartridge and FujiNet tabs, the prompt (and the commands it refuses),
+ * saving, and detach lets it run again.
  *
  * Copyright (C) 2026 Thomas Cherryhomes
  * SPDX-License-Identifier: GPL-3.0-or-later
@@ -252,6 +252,16 @@ int main(void)
         check(cart.mode == 2 && cart.handover == 2, "a game, started by the loader");
         check(cart.live_crc == test_crc32(image + 128, sizeof image - 128), "its CRC is the test image's");
         check(a7800debug_cart_info(d, out, sizeof out) > 0 && strstr(out, "FujiNet"), "cart info line");
+    }
+
+    /* the FujiNet tab, with FujiNet off: the link pane says so, and the
+     * trace (fujitrace_test covers its decoding) clears */
+    {
+        static a7800debug_fuji_packet pk[A7800DEBUG_FUJI_TRACE_MAX];
+        check(a7800debug_fujinet_state(d, out, sizeof out) > 0 && strstr(out, "FujiNet     off")
+              && strstr(out, "Link        down"), "FujiNet tab: FujiNet off, the link down");
+        a7800debug_fujinet_trace_clear(d);
+        check(a7800debug_fujinet_trace(d, pk, A7800DEBUG_FUJI_TRACE_MAX) == 0, "FujiNet tab: the trace clears");
     }
 
     /* the prompt */

@@ -1,8 +1,8 @@
 /*
  * Debugger window (Win32) over MAME's debugger engine, via
  * core/include/a7800debug.h. Mirrors the GTK and Qt debuggers tab for tab --
- * Console, CPU & Memory, Disassembly, MARIA, I/O, Cartridge, Breakpoints --
- * built from plain common controls.
+ * Console, CPU & Memory, Disassembly, MARIA, I/O, Cartridge, Breakpoints,
+ * FujiNet -- built from plain common controls.
  *
  * MAME's debugger is always on in this app; showing the window attaches
  * (which stops the machine, as on every sibling) and hiding it detaches,
@@ -38,7 +38,7 @@
 
 enum {
     PAGE_CONSOLE = 0, PAGE_CPU, PAGE_DISASM, PAGE_MARIA, PAGE_IO, PAGE_CART, PAGE_BREAKS,
-    PAGE_COUNT
+    PAGE_FUJINET, PAGE_COUNT
 };
 
 enum {
@@ -54,6 +54,7 @@ enum {
     IDC_BP_LIST, IDC_BP_TYPE, IDC_BP_START, IDC_BP_END, IDC_BP_COND, IDC_BP_ADD,
     IDC_BP_REMOVE, IDC_BP_ENABLE, IDC_BP_CLEAR,
     IDC_CART,
+    IDC_FUJI_CLEAR, IDC_FUJI_TEXT, IDC_FUJI_STATE,
     IDC_SAVE_KIND0, IDC_SAVE_KIND_LAST = IDC_SAVE_KIND0 + 2,
     IDC_LABEL_FIRST
 };
@@ -79,10 +80,13 @@ typedef struct {
 
     HWND cart;
 
+    HWND fuji_title, fuji_note, fuji_clear, fuji_text, state_title, fuji_state;
+
     HFONT mono, ui;
     HACCEL accel;
     HBRUSH accent;
     int line_h;
+    int mono_h;                /* a text view's row */
 
     a7800session *session;
     a7800debug *dbg;
@@ -102,6 +106,9 @@ typedef struct {
 
     a7800debug_breakpoint bps[MAX_BPS];
     int nbps;
+
+    int fuji_count;            /* packets shown, -1 to rebuild */
+    uint64_t fuji_last;        /* the last one's serial */
 
     /* The MARIA tab's picture: the palettes as the engine draws them, and
      * the 32 colour registers as written. */
@@ -164,6 +171,81 @@ static void append_text_lf(HWND h, const char *text)
 }
 
 static void edit_text(HWND h, char *out, int outsz) { GetWindowTextA(h, out, outsz); }
+
+/* ---- the FujiNet tab's views: UTF-8 text, shown wide -------------------------- */
+
+/* EDIT controls want CR LF and draw control characters as boxes: engine
+ * text (UTF-8) as the wide text a view shows. */
+static wchar_t *wide_view_text(const char *text)
+{
+    size_t n = strlen(text), i, o = 0;
+    char *buf = malloc(n * 2 + 1);
+    wchar_t *w = NULL;
+    int wn;
+    if (!buf) return NULL;
+    for (i = 0; i < n; i++) {
+        unsigned char c = (unsigned char)text[i];
+        if (c == '\n') { buf[o++] = '\r'; buf[o++] = '\n'; }
+        else if (c >= 0x20 || c == '\t') buf[o++] = (char)c;
+    }
+    buf[o] = '\0';
+    wn = MultiByteToWideChar(CP_UTF8, 0, buf, -1, NULL, 0);
+    if (wn > 0 && (w = malloc((size_t)wn * sizeof *w)) != NULL)
+        MultiByteToWideChar(CP_UTF8, 0, buf, -1, w, wn);
+    free(buf);
+    return w;
+}
+
+/* A label set only when it changed (no flicker on the live refresh). */
+static void set_label(HWND h, const char *utf8)
+{
+    wchar_t cur[512], w[512];
+    if (!MultiByteToWideChar(CP_UTF8, 0, utf8, -1, w, 512)) w[0] = 0;
+    GetWindowTextW(h, cur, 512);
+    if (wcscmp(cur, w) != 0) SetWindowTextW(h, w);
+}
+
+/* The rows an EDIT view shows. */
+static int edit_rows(debugger *d, HWND h)
+{
+    RECT c;
+    GetClientRect(h, &c);
+    return d->mono_h > 0 && c.bottom > d->mono_h ? c.bottom / d->mono_h : 1;
+}
+
+/* A log follows its end while its reader is there. */
+static int edit_at_end(debugger *d, HWND h)
+{
+    const int first = (int)SendMessageW(h, EM_GETFIRSTVISIBLELINE, 0, 0);
+    const int count = (int)SendMessageW(h, EM_GETLINECOUNT, 0, 0);
+    return first + edit_rows(d, h) >= count;
+}
+
+static void edit_to_end(HWND h)
+{
+    SendMessageW(h, EM_LINESCROLL, 0, SendMessageW(h, EM_GETLINECOUNT, 0, 0));
+}
+
+static void edit_scroll_to(HWND h, int first)
+{
+    SendMessageW(h, EM_LINESCROLL, 0, first - (int)SendMessageW(h, EM_GETFIRSTVISIBLELINE, 0, 0));
+}
+
+/* Replaces a view's text where the reader left it (a refresh must not throw
+ * a scrolled view back to its top), or, following, at its end. */
+static void set_text_at(HWND h, const char *text, int follow)
+{
+    const int first = (int)SendMessageW(h, EM_GETFIRSTVISIBLELINE, 0, 0);
+    wchar_t *w = wide_view_text(text);
+    if (!w) return;
+    SendMessageW(h, WM_SETREDRAW, FALSE, 0);
+    SetWindowTextW(h, w);
+    if (follow) edit_to_end(h);
+    else edit_scroll_to(h, first);
+    SendMessageW(h, WM_SETREDRAW, TRUE, 0);
+    InvalidateRect(h, NULL, TRUE);
+    free(w);
+}
 
 /* $hex, 0xhex, #dec, or bare hex, as the prompt reads numbers. */
 static int parse_num(const char *text, long *out)
@@ -476,6 +558,44 @@ static void refresh_cart(debugger *d)
     set_text_lf(d->cart, s);
 }
 
+static void refresh_fujinet(debugger *d, int force)
+{
+    static a7800debug_fuji_packet p[A7800DEBUG_FUJI_TRACE_MAX];
+    static char t[A7800DEBUG_FUJI_TRACE_MAX * 320 + 128];
+    static char state[2048];
+    char note[200], status[160];
+    size_t len = 0;
+    int n = a7800debug_fujinet_trace(d->dbg, p, A7800DEBUG_FUJI_TRACE_MAX), i, follow;
+
+    if (!a7800session_is_running(d->session)) {
+        snprintf(note, sizeof note, "The console is off.");
+    } else if (!a7800session_fujinet_running(d->session)) {
+        snprintf(note, sizeof note, "FujiNet is off (Settings \xe2\x96\xb8 Enable FujiNet).");
+    } else {
+        a7800session_cart_status(d->session, status, sizeof status);
+        snprintf(note, sizeof note, "FujiNet cartridge, %s.", status);
+    }
+    set_label(d->fuji_note, note);
+    state[0] = '\0';
+    a7800debug_fujinet_state(d->dbg, state, sizeof state);
+    set_text_at(d->fuji_state, state, 0);
+    if (n < 0) n = 0;
+
+    if (!force && n == d->fuji_count && (n == 0 || p[n - 1].serial == d->fuji_last)) return;
+    follow = force || d->fuji_count < 0 || edit_at_end(d, d->fuji_text);
+    d->fuji_count = n;
+    d->fuji_last = n > 0 ? p[n - 1].serial : 0;
+    for (i = 0; i < n; i++) {
+        int k;
+        len = addf(t, len, sizeof t, "%s%s\n     ", i ? "\n" : "", p[i].text);
+        for (k = 0; k < p[i].nbytes && k < (int)sizeof p[i].data; k++)
+            len = addf(t, len, sizeof t, "%02X ", p[i].data[k]);
+        if (p[i].nbytes > (int)sizeof p[i].data) len = addf(t, len, sizeof t, "\xe2\x80\xa6");
+    }
+    if (n == 0) len = addf(t, len, sizeof t, "(no FujiBus packets since the trace was cleared)");
+    set_text_at(d->fuji_text, t, follow);
+}
+
 static void refresh_all(debugger *d)
 {
     refresh_status(d);
@@ -486,6 +606,7 @@ static void refresh_all(debugger *d)
     refresh_io(d);
     refresh_bps(d);
     refresh_cart(d);
+    refresh_fujinet(d, 0);
 }
 
 /* ---- actions ------------------------------------------------------------------ */
@@ -923,7 +1044,8 @@ static void build_controls(debugger *d)
 {
     TCITEMA item;
     static const char *const tabs[PAGE_COUNT] = { "Console", "CPU && Memory", "Disassembly", "MARIA",
-                                                  "I/O", "Cartridge", "Breakpoints && Watchpoints" };
+                                                  "I/O", "Cartridge", "Breakpoints && Watchpoints",
+                                                  "FujiNet" };
     static const char *const reg_names[6] = { "PC", "SP", "A", "X", "Y", "P" };
     static const char *const flag_names[6] = { "N", "V", "D", "I", "Z", "C" };
     static const char *const bp_types[4] = { "Execute", "Read", "Write", "Read/Write" };
@@ -1013,6 +1135,14 @@ static void build_controls(debugger *d)
     d->bp_remove = button(d, "Remove", IDC_BP_REMOVE);
     d->bp_enable = button(d, "Enable/Disable", IDC_BP_ENABLE);
     d->bp_clear = button(d, "Clear all", IDC_BP_CLEAR);
+
+    /* FujiNet */
+    d->fuji_title = label(d, "FujiBus packets (SLIP-decoded)");
+    d->fuji_note = label(d, "");
+    d->fuji_clear = button(d, "Clear", IDC_FUJI_CLEAR);
+    d->fuji_text = mono_view(d, IDC_FUJI_TEXT, 0);
+    d->state_title = label(d, "The cartridge's link");
+    d->fuji_state = mono_view(d, IDC_FUJI_STATE, 0);
 }
 
 static void show_page(debugger *d, int page)
@@ -1024,6 +1154,7 @@ static void show_page(debugger *d, int page)
     HWND maria[] = { d->maria_text, d->maria_pic };
     HWND brk[] = { d->bp_list, d->bp_type, d->bp_start_label, d->bp_start, d->bp_end_label, d->bp_end,
                    d->bp_cond_label, d->bp_cond, d->bp_add, d->bp_remove, d->bp_enable, d->bp_clear };
+    HWND fuji[] = { d->fuji_title, d->fuji_note, d->fuji_clear, d->fuji_text, d->state_title, d->fuji_state };
     size_t i;
     d->page = page;
 #define SHOW(arr, p) for (i = 0; i < sizeof(arr) / sizeof((arr)[0]); i++) ShowWindow((arr)[i], page == (p) ? SW_SHOW : SW_HIDE)
@@ -1039,6 +1170,7 @@ static void show_page(debugger *d, int page)
     ShowWindow(d->io, page == PAGE_IO ? SW_SHOW : SW_HIDE);
     ShowWindow(d->cart, page == PAGE_CART ? SW_SHOW : SW_HIDE);
     SHOW(brk, PAGE_BREAKS);
+    SHOW(fuji, PAGE_FUJINET);
 #undef SHOW
 }
 
@@ -1130,6 +1262,18 @@ static void layout(debugger *d)
         MoveWindow(d->bp_enable, px + 96, ry, 120, 26, TRUE);
         MoveWindow(d->bp_clear, px + 222, ry, 90, 26, TRUE);
     }
+
+    /* FujiNet: the packets left (a note and Clear over them), the link right */
+    {
+        const int rw = pw / 3 > 320 ? 320 : pw / 3 > 220 ? pw / 3 : 220;
+        const int lw = pw - rw - 12;
+        MoveWindow(d->fuji_title, px, py + 4, lw, 18, TRUE);
+        MoveWindow(d->fuji_clear, px + lw - 70, py + 24, 70, 26, TRUE);
+        MoveWindow(d->fuji_note, px, py + 28, lw - 78, 18, TRUE);
+        MoveWindow(d->fuji_text, px, py + 56, lw, ph - 56, TRUE);
+        MoveWindow(d->state_title, px + lw + 12, py + 4, rw, 18, TRUE);
+        MoveWindow(d->fuji_state, px + lw + 12, py + 24, rw, ph - 24, TRUE);
+    }
 }
 
 /* ---- attach / detach -------------------------------------------------------------- */
@@ -1199,6 +1343,7 @@ static LRESULT CALLBACK dbg_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
                 else if (d->page == PAGE_MARIA) refresh_maria(d);
                 else if (d->page == PAGE_IO) refresh_io(d);
                 else if (d->page == PAGE_CART) refresh_cart(d);
+                else if (d->page == PAGE_FUJINET) refresh_fujinet(d, 0);
             }
         }
         return 0;
@@ -1212,6 +1357,7 @@ static LRESULT CALLBACK dbg_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         if (((LPNMHDR)lp)->code == (UINT)TCN_SELCHANGE) {
             show_page(d, (int)SendMessageA(d->tabs, TCM_GETCURSEL, 0, 0));
             layout(d);
+            if (d->page == PAGE_FUJINET) refresh_fujinet(d, 0);
             return 0;
         }
         break;
@@ -1226,7 +1372,8 @@ static LRESULT CALLBACK dbg_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         if (wp == IDC_DISASM) { draw_disasm_line(d, (const DRAWITEMSTRUCT *)lp); return TRUE; }
         break;
     case WM_CTLCOLORSTATIC:
-        if ((HWND)lp == d->status || (HWND)lp == d->cycles || (HWND)lp == d->disasm_hint) {
+        if ((HWND)lp == d->status || (HWND)lp == d->cycles || (HWND)lp == d->disasm_hint ||
+            (HWND)lp == d->fuji_note) {
             SetTextColor((HDC)wp, GetSysColor(COLOR_GRAYTEXT));
             SetBkColor((HDC)wp, GetSysColor(COLOR_BTNFACE));
             return (LRESULT)GetSysColorBrush(COLOR_BTNFACE);
@@ -1291,6 +1438,10 @@ static LRESULT CALLBACK dbg_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             a7800debug_breakpoint_clear(d->dbg);
             refresh_bps(d);
             refresh_disasm(d);
+            return 0;
+        case IDC_FUJI_CLEAR:
+            a7800debug_fujinet_trace_clear(d->dbg);
+            refresh_fujinet(d, 1);
             return 0;
         case IDCANCEL:
             detach_and_hide(d);
@@ -1361,6 +1512,7 @@ void a7800_debugger_show(HWND parent, a7800session *session)
     d->dbg = a7800session_debugger(session);
     d->sel_addr = -1;
     d->mem_base_addr = 0x1800;
+    d->fuji_count = -1;
     g_dbg = d;
 
     d->hwnd = CreateWindowExA(0, "A7800DebuggerWindow", "Debugger", WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
@@ -1378,6 +1530,7 @@ void a7800_debugger_show(HWND parent, a7800session *session)
         TEXTMETRICA tm;
         HGDIOBJ of = SelectObject(dc, d->mono);
         d->line_h = GetTextMetricsA(dc, &tm) ? tm.tmHeight + 3 : 18;
+        d->mono_h = d->line_h - 3;
         SelectObject(dc, of);
         ReleaseDC(d->hwnd, dc);
     }

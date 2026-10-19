@@ -29,6 +29,7 @@ extern "C" {
 // debug.cpp
 void a7800debug_note_stop(a7800session* s);
 void a7800debug_destroy(a7800session* s);
+void a7800debug_fujinet_tap(void* user, int dir, const uint8_t* raw, size_t len);
 
 namespace {
 
@@ -195,6 +196,8 @@ int restart_machine(struct a7800session* s)
 			cfg.bootImage = c.image;
 			cfg.hscRom = hsc_rom(s);
 			cfg.hscOn = s->opts.hsc && !cfg.hscRom.empty();
+			cfg.fujinetTrace = a7800debug_fujinet_tap;
+			cfg.fujinetTraceUser = a7800debug_get(s);
 			std::string err2;
 			if(!host_of(s)->Start(cfg, err2)) {
 				session_set_error(s, "%s", err2.c_str());
@@ -410,6 +413,10 @@ extern "C" int a7800session_start(a7800session* s, const a7800session_start_opts
 	cfg.bootImage = c.image;
 	cfg.hscRom = hsc_rom(s);
 	cfg.hscOn = s->opts.hsc && !cfg.hscRom.empty();
+	// The FujiNet trace runs from the start, debugger or not: it is most
+	// useful about what happened before anyone looked.
+	cfg.fujinetTrace = a7800debug_fujinet_tap;
+	cfg.fujinetTraceUser = a7800debug_get(s);
 
 	MameHost::Callbacks cb;
 	cb.onStopped = [s] { a7800debug_note_stop(s); };

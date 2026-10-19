@@ -1,6 +1,7 @@
 /*
  * fujibus_smoke -- the real in-process FujiNet: libfujinet starts on its
- * port, the CONFIG client boots, and the cartridge's link comes up. This is
+ * port, the CONFIG client boots, the cartridge's link comes up, and the
+ * debugger's FujiNet trace sees requests and replies. This is
  * the one test that proves the whole chain -- the MAME fork's FujiNet
  * cartridge and its link, the RS232 PC runtime's BoIP listener, the port
  * numbers and the start ordering -- rather than any one piece.
@@ -15,6 +16,7 @@
 #include <string.h>
 #include <time.h>
 
+#include "a7800debug.h"
 #include "a7800session.h"
 #include "test_tmpdir.h"
 
@@ -76,6 +78,21 @@ int main(void)
     check(strstr(logbuf, "BoIP") != NULL || strstr(logbuf, "connected") != NULL || logbuf[0] != '\0',
           "the FujiNet console log has content");
     check(a7800session_cart_booted_game(s) == 0, "nothing has been booted yet");
+
+    /* the trace runs without a debugger window: CONFIG's requests and
+     * FujiNet's replies, decoded */
+    {
+        static a7800debug_fuji_packet pk[A7800DEBUG_FUJI_TRACE_MAX];
+        const int n = a7800debug_fujinet_trace(a7800session_debugger(s), pk, A7800DEBUG_FUJI_TRACE_MAX);
+        int i, sent = 0, received = 0;
+        for (i = 0; i < n; i++) {
+            if (pk[i].device < 0) continue;
+            if (pk[i].to_host) received++; else sent++;
+        }
+        printf("trace: %d packets, %d requests, %d replies%s%s\n", n, sent, received,
+               n ? "; first: " : "", n ? pk[0].text : "");
+        check(sent > 0 && received > 0, "the FujiNet trace saw a request and a reply");
+    }
 
     /* reboot: the old link must die before the new one dials in (backlog 1) */
     check(a7800session_reboot_to_config(s) == 0, "reboot to CONFIG");

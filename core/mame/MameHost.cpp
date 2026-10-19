@@ -126,6 +126,8 @@ bool MameHost::Start(const Config& config, std::string& error)
 		error = "libmame_fngo is a different version than this program was built for";
 		return false;
 	}
+	// before the first cartridge exists, so its first frame is traced
+	fngo_mame_fujinet_trace(config.fujinetTrace, config.fujinetTraceUser);
 
 	fngo_mame_callbacks cb = {};
 	cb.frame = CbFrame;
@@ -136,6 +138,7 @@ bool MameHost::Start(const Config& config, std::string& error)
 	cb.user = this;
 	_mame = fngo_mame_create(&cb, config.mameDir.c_str());
 	if(!_mame) {
+		fngo_mame_fujinet_trace(nullptr, nullptr);
 		error = "MAME is already running in this process";
 		return false;
 	}
@@ -165,6 +168,7 @@ bool MameHost::Start(const Config& config, std::string& error)
 	const int rc = pthread_create(&_thread, &attr, &MameHost::ThreadMain, this);
 	pthread_attr_destroy(&attr);
 	if(rc != 0) {
+		fngo_mame_fujinet_trace(nullptr, nullptr);
 		fngo_mame_destroy(_mame);
 		_mame = nullptr;
 		error = "cannot start the emulation thread";
@@ -205,6 +209,9 @@ void MameHost::Stop()
 	}
 	_vsyncCv.notify_all();
 	pthread_join(_thread, nullptr);
+	// the cartridge's worker has stopped with the machine; this waits out
+	// a frame being traced, if not
+	fngo_mame_fujinet_trace(nullptr, nullptr);
 	_threadStarted = false;
 	_running.store(false);
 

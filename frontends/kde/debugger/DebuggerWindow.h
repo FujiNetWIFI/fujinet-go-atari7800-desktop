@@ -16,6 +16,7 @@
 #include <QMainWindow>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QTabWidget>
 #include <QTableWidget>
 #include <QTimer>
 #include <cstdint>
@@ -50,6 +51,7 @@ private:
     QWidget *buildIo();
     QWidget *buildCart();
     QWidget *buildBreaks();
+    QWidget *buildFujinet();
 
     void refreshAll();
     void refreshStatus();
@@ -60,6 +62,7 @@ private:
     void refreshIo();
     void refreshBps();
     void refreshCart();
+    void refreshFujinet(bool force);
     void tick();
     void runPrompt();
     void appendPrompt(const QString &text);
@@ -74,6 +77,7 @@ private:
     bool m_wasStopped = false;
     int m_runningTicks = 0;
     QTimer m_timer;
+    QTabWidget *m_tabs = nullptr;
 
     QLabel *m_status = nullptr;
     QPushButton *m_runBtn = nullptr;
@@ -109,4 +113,9 @@ private:
     bool m_bpFilling = false;
 
     QPlainTextEdit *m_cart = nullptr;
+
+    QLabel *m_fujiNote = nullptr;
+    QPlainTextEdit *m_fujiText = nullptr, *m_fujiState = nullptr;
+    int m_fujiCount = -1;           /* packets shown, -1 to rebuild */
+    uint64_t m_fujiLast = 0;        /* the last one's serial */
 };

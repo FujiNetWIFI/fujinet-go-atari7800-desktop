@@ -68,8 +68,10 @@ desktop app, with no BIOS needed. A member of the FujiNet Go desktop family
   Disassembly (toggle breakpoints, follow PC, labels from ld65/ca65/plain
   symbol files), MARIA (control register decoded, the display list list,
   the palettes), I/O (INPTCTRL, TIA sound, RIOT ports, INPT0-5, POKEY),
-  Cartridge (link, mode, hand-over, load progress, mapper, HSC) and
-  Breakpoints & Watchpoints. The engine is MAME's.
+  Cartridge (link, mode, hand-over, load progress, mapper, HSC),
+  Breakpoints & Watchpoints, and FujiNet (every FujiBus packet on the
+  cartridge's link, both ways, with hex, traced from power-on). The engine
+  is MAME's.
 - **Gamepads that come and go.** SDL3 hot-plug: a pad plugged in while a game
   runs is assigned to the next free player within a second, unplugging
   releases it, and a pad that comes back gets its player back; each event is
