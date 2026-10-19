@@ -80,14 +80,20 @@ int main(void)
     check(a7800session_cart_booted_game(s) == 0, "nothing has been booted yet");
 
     /* the trace runs without a debugger window: CONFIG's requests and
-     * FujiNet's replies, decoded */
+     * FujiNet's replies, decoded. A slow runner can still be loading
+     * CONFIG here, so give it up to 30 s. */
     {
         static a7800debug_fuji_packet pk[A7800DEBUG_FUJI_TRACE_MAX];
-        const int n = a7800debug_fujinet_trace(a7800session_debugger(s), pk, A7800DEBUG_FUJI_TRACE_MAX);
-        int i, sent = 0, received = 0;
-        for (i = 0; i < n; i++) {
-            if (pk[i].device < 0) continue;
-            if (pk[i].to_host) received++; else sent++;
+        int n = 0, i, sent = 0, received = 0;
+        for (waited = 0; waited < 30000; waited += 100) {
+            n = a7800debug_fujinet_trace(a7800session_debugger(s), pk, A7800DEBUG_FUJI_TRACE_MAX);
+            sent = received = 0;
+            for (i = 0; i < n; i++) {
+                if (pk[i].device < 0) continue;
+                if (pk[i].to_host) received++; else sent++;
+            }
+            if (sent > 0 && received > 0) break;
+            sleep_ms(100);
         }
         printf("trace: %d packets, %d requests, %d replies%s%s\n", n, sent, received,
                n ? "; first: " : "", n ? pk[0].text : "");
