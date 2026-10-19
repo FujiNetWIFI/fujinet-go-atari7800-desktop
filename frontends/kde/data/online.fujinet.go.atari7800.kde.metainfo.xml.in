@@ -43,7 +43,15 @@
     <!-- The CURRENT release templates its version from @PROJECT_VERSION@, so
          it cannot disagree with the tree; past releases are literal. The
          release job checks that this first entry is still a template. -->
-    <release version="@PROJECT_VERSION@" date="2026-10-08">
+    <release version="@PROJECT_VERSION@" date="2026-10-19">
+      <description>
+        <p>
+          Debugger: a FujiNet tab shows every FujiBus packet between the
+          7800's FujiNet cartridge and FujiNet, both ways, with hex.
+        </p>
+      </description>
+    </release>
+    <release version="0.1.0" date="2026-10-08">
       <description>
         <p>
           First release: MAME's Atari 7800 with the FujiNet Atari 7800
