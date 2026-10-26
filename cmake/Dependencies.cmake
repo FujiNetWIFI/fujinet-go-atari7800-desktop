@@ -45,10 +45,10 @@ find_package(Git QUIET)
 
 # MAME, tschak909/mame branch fujinet-go-a7800. Recorded in three places --
 # here and in both flatpak manifests (build-aux/flatpak/*.yml).
-set(MAME_COMMIT "8f3928208229009b8d302d0805ddb64623560288")
+set(MAME_COMMIT "69f9a13109ccf7363a569ba427040d831a2a7baa")
 set(MAME_URL "https://github.com/tschak909/mame")
 set(MAME_ARCHIVE "${MAME_URL}/archive/${MAME_COMMIT}.tar.gz")
-set(MAME_ARCHIVE_SHA256 "2f9895d862156bb9f6b2ff384bed9ca7c2bbb2eb0928ee9d867d528da579c39c")
+set(MAME_ARCHIVE_SHA256 "511f12fdf06069020394520fd8ff30c8fa17e800058eaffaceccde434f999dee")
 
 # fujinet-firmware, branch tcp-protocol-disable-nagle (c68e86303): master plus
 # TCP_NODELAY on the BoIP listener's accepted socket. Recorded in three places

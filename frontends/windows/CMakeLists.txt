@@ -1,4 +1,5 @@
-# The Windows frontend: Win32 + GDI, no toolkit.
+# The Windows frontend: Win32 with a Direct3D 11 picture (GDI fallback), no
+# toolkit.
 #
 # WIN32_EXECUTABLE gives WinMain and no console window. The manifest is
 # generated from PROJECT_VERSION rather than repeating it, so the version
@@ -19,6 +20,7 @@ enable_language(RC)
 
 add_executable(fujinet-go-atari7800-windows WIN32
   main.c
+  display.c
   controllers/controller_window.c
   debugger/dbg_window.c
   resource.rc
@@ -27,11 +29,12 @@ target_include_directories(fujinet-go-atari7800-windows PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(fujinet-go-atari7800-windows PRIVATE
   a7800_session
-  # dwmapi: DwmFlush, this platform's frame clock. comdlg32: the file
+  # d3d11: the picture (display.c; d3dcompiler_47 and avrt are loaded, not
+  # linked). dwmapi: DwmFlush, the GDI fallback's frame clock. comdlg32: the file
   # dialogs. shell32: DragQueryFile and ShellExecute for the web UI.
   # comctl32: the debugger's tab control and the settings trackbar (and the
   # v6 manifest above is what makes them look like this decade).
-  dwmapi comdlg32 shell32 comctl32)
+  d3d11 dwmapi comdlg32 shell32 comctl32)
 target_compile_options(fujinet-go-atari7800-windows PRIVATE -Wall -Wextra)
 # mame_fngo.dll beside the exe (cmake/BuildMame.cmake installs it there)
 a7800_link_mame(fujinet-go-atari7800-windows)

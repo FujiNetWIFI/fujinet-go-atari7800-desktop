@@ -1,7 +1,8 @@
 /*
  * FujiNet Go Atari 7800 -- the Windows (Win32 + GDI) frontend.
  *
- * No toolkit: a plain window, a menu bar, a status bar and StretchDIBits.
+ * No toolkit: a plain window, a menu bar and a status bar, with the picture a
+ * child window drawn by display.c (Direct3D 11, GDI as the fallback).
  * That is enough for MARIA's 320-pixel-wide picture (224 lines NTSC, 260
  * PAL), and it keeps the artifact a folder you copy rather than a runtime
  * hunt.
@@ -26,7 +27,6 @@
 
 #include <windows.h>
 #include <commctrl.h>
-#include <dwmapi.h>
 #include <windowsx.h>
 
 #include <stdio.h>
@@ -35,6 +35,7 @@
 
 #include "a7800session.h"
 #include "controllers/controller_window.h"
+#include "display.h"
 #include "debugger/dbg_window.h"
 #include "key_forward.h"
 #include "resource.h"
@@ -50,13 +51,7 @@
 static a7800session *g_session;
 static HWND g_hwnd;
 static HWND g_statusbar;
-static uint32_t *g_fb;
-static int g_fb_height;
-static uint64_t g_serial;
-static BITMAPINFO g_bmi;
-static CRITICAL_SECTION g_fb_lock;
-static volatile LONG g_running = 1;
-static HANDLE g_present_thread;
+static HWND g_display;
 static int g_aspect = 0, g_smooth = 0, g_fullscreen = 0;   /* aspect: 0 TV (4:3), 1 square pixels */
 static WINDOWPLACEMENT g_placement;
 static int g_sysact_down[A7800_SYSACT_COUNT];
@@ -65,10 +60,6 @@ static char g_pad_notice[160];
 static DWORD g_pad_notice_until;
 static int g_diff_shown[2] = { -1, -1 };    /* difficulty checks the menu last showed */
 
-/* Where the picture was last drawn (client coordinates), for mapping the
- * pointer back to frame pixels. Written by paint, read by the mouse. */
-static RECT g_pic_rect;
-static int g_pic_fbh;
 static unsigned g_mouse_buttons;       /* bit 0 left, bit 1 right */
 static int g_pointer_sent;             /* the session has a pointer to clear */
 static int g_tracking_leave;
@@ -77,34 +68,6 @@ static int g_tracking_leave;
  * dot that wears the accent colour while its link to FujiNet is up. */
 static char g_status_text[400];
 static int g_status_link;
-
-/* ---- the present thread: this platform's frame clock ---------------------- */
-
-static DWORD WINAPI present_thread(LPVOID arg)
-{
-    (void)arg;
-    while (InterlockedCompareExchange(&g_running, 1, 1)) {
-        LARGE_INTEGER t, f;
-        int h = 0;
-        /* Blocks until the compositor's next vblank; falls through at once
-         * if the DWM is off, and the host's wall-clock pacing takes over --
-         * which is the whole reason notify_vsync is advisory. */
-        if (FAILED(DwmFlush())) Sleep(8);
-        QueryPerformanceCounter(&t);
-        QueryPerformanceFrequency(&f);
-        a7800session_notify_vsync(g_session,
-                                (int64_t)(t.QuadPart * 1000000000LL / f.QuadPart));
-        EnterCriticalSection(&g_fb_lock);
-        if (a7800session_copy_frame(g_session, g_fb, &h, &g_serial)) {
-            g_fb_height = h;
-            LeaveCriticalSection(&g_fb_lock);
-            InvalidateRect(g_hwnd, NULL, FALSE);
-        } else {
-            LeaveCriticalSection(&g_fb_lock);
-        }
-    }
-    return 0;
-}
 
 /* ---- painting ------------------------------------------------------------- */
 
@@ -116,38 +79,15 @@ static int statusbar_height(void)
     return r.bottom - r.top;
 }
 
-static void paint(HDC dc)
+/* The picture fills the client above the status bar. */
+static void layout_display(void)
 {
     RECT rc;
-    double want, w, h, sw, sh;
-    int fbh;
-
+    int h;
+    if (!g_display) return;
     GetClientRect(g_hwnd, &rc);
-    rc.bottom -= statusbar_height();
-    w = rc.right - rc.left;
-    h = rc.bottom - rc.top;
-    FillRect(dc, &rc, (HBRUSH)GetStockObject(BLACK_BRUSH));
-    if (w <= 0 || h <= 0) return;
-
-    EnterCriticalSection(&g_fb_lock);
-    fbh = g_fb_height;
-    if (fbh <= 0) { LeaveCriticalSection(&g_fb_lock); return; }
-
-    /* A television showed the whole picture at 4:3, NTSC or PAL; "square"
-     * shows the framebuffer's pixels exactly. */
-    want = g_aspect == 0 ? 4.0 / 3.0 : (double)A7800SESSION_FB_WIDTH / (double)fbh;
-    if (w / h > want) { sh = h; sw = sh * want; }
-    else              { sw = w; sh = sw / want; }
-
-    /* The session's pixels are 0x00RRGGBB: exactly a 32-bit BI_RGB DIB. */
-    g_bmi.bmiHeader.biHeight = -fbh;   /* top-down */
-    SetStretchBltMode(dc, g_smooth ? HALFTONE : COLORONCOLOR);
-    SetRect(&g_pic_rect, (int)((w - sw) / 2), (int)((h - sh) / 2),
-            (int)((w - sw) / 2) + (int)sw, (int)((h - sh) / 2) + (int)sh);
-    g_pic_fbh = fbh;
-    StretchDIBits(dc, g_pic_rect.left, g_pic_rect.top, (int)sw, (int)sh,
-                  0, 0, A7800SESSION_FB_WIDTH, fbh, g_fb, &g_bmi, DIB_RGB_COLORS, SRCCOPY);
-    LeaveCriticalSection(&g_fb_lock);
+    h = rc.bottom - statusbar_height();
+    MoveWindow(g_display, 0, 0, rc.right, h > 0 ? h : 0, TRUE);
 }
 
 /* ---- the light gun ----------------------------------------------------------- */
@@ -155,12 +95,15 @@ static void paint(HDC dc)
 /* Client coordinates to frame pixels; 1 if over the picture. */
 static int pointer_to_frame(int cx, int cy, int *x, int *y)
 {
-    const int pw = g_pic_rect.right - g_pic_rect.left;
-    const int ph = g_pic_rect.bottom - g_pic_rect.top;
-    if (pw <= 0 || ph <= 0 || g_pic_fbh <= 0) return 0;
-    *x = (int)((long long)(cx - g_pic_rect.left) * A7800SESSION_FB_WIDTH / pw);
-    *y = (int)((long long)(cy - g_pic_rect.top) * g_pic_fbh / ph);
-    return *x >= 0 && *x < A7800SESSION_FB_WIDTH && *y >= 0 && *y < g_pic_fbh;
+    RECT pic;
+    int fbh, pw, ph;
+    if (!a7800_display_picture(&pic, &fbh)) return 0;
+    pw = pic.right - pic.left;
+    ph = pic.bottom - pic.top;
+    if (pw <= 0 || ph <= 0) return 0;
+    *x = (int)((long long)(cx - pic.left) * A7800SESSION_FB_WIDTH / pw);
+    *y = (int)((long long)(cy - pic.top) * fbh / ph);
+    return *x >= 0 && *x < A7800SESSION_FB_WIDTH && *y >= 0 && *y < fbh;
 }
 
 static void forward_pointer(int cx, int cy)
@@ -595,7 +538,7 @@ static LRESULT CALLBACK settings_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
                 g_aspect = (int)SendMessageA(GetDlgItem(hwnd, IDC_SET_ASPECT), CB_GETCURSEL, 0, 0);
                 a7800session_set_int(g_session, "aspect", g_aspect);
                 if (m) CheckMenuItem(m, IDM_TV_ASPECT, MF_BYCOMMAND | (g_aspect == 0 ? MF_CHECKED : MF_UNCHECKED));
-                InvalidateRect(g_hwnd, NULL, TRUE);
+                a7800_display_set_options(g_aspect, g_smooth);
             }
             return 0;
         case IDC_SET_PORT0:
@@ -927,24 +870,15 @@ static void toggle_fullscreen(HWND hwnd)
                      SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
         g_fullscreen = 0;
     }
-    InvalidateRect(hwnd, NULL, TRUE);
+    layout_display();
 }
 
 static LRESULT CALLBACK wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 {
     switch (msg) {
-    case WM_PAINT: {
-        PAINTSTRUCT ps;
-        HDC dc = BeginPaint(hwnd, &ps);
-        paint(dc);
-        EndPaint(hwnd, &ps);
-        return 0;
-    }
-    case WM_ERASEBKGND:
-        return 1;
     case WM_SIZE:
         layout_statusbar();
-        InvalidateRect(hwnd, NULL, FALSE);
+        layout_display();
         return 0;
     case WM_DRAWITEM:
         if (wp == IDC_STATUSBAR) { draw_status_part((const DRAWITEMSTRUCT *)lp); return TRUE; }
@@ -1085,7 +1019,7 @@ static LRESULT CALLBACK wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             g_aspect = g_aspect ? 0 : 1;
             if (m) CheckMenuItem(m, IDM_TV_ASPECT, MF_BYCOMMAND | (g_aspect == 0 ? MF_CHECKED : MF_UNCHECKED));
             a7800session_set_int(g_session, "aspect", g_aspect);
-            InvalidateRect(hwnd, NULL, TRUE);
+            a7800_display_set_options(g_aspect, g_smooth);
             return 0;
         }
         case IDM_SMOOTH: {
@@ -1093,7 +1027,7 @@ static LRESULT CALLBACK wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             g_smooth = !g_smooth;
             if (m) CheckMenuItem(m, IDM_SMOOTH, MF_BYCOMMAND | (g_smooth ? MF_CHECKED : MF_UNCHECKED));
             a7800session_set_int(g_session, "smooth", g_smooth);
-            InvalidateRect(hwnd, NULL, TRUE);
+            a7800_display_set_options(g_aspect, g_smooth);
             return 0;
         }
         case IDM_SETTINGS: show_settings((HINSTANCE)GetWindowLongPtr(hwnd, GWLP_HINSTANCE)); return 0;
@@ -1105,16 +1039,29 @@ static LRESULT CALLBACK wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             }
             ShellExecuteA(hwnd, "open", a7800session_fujinet_webui_url(g_session), NULL, NULL, SW_SHOWNORMAL);
             return 0;
-        case IDM_ABOUT:
-            MessageBoxA(hwnd,
+        case IDM_ABOUT: {
+            /* MB_USERICON with the app's own icon, not a stock Windows one. */
+            MSGBOXPARAMSA mb;
+            char text[800];
+            snprintf(text, sizeof text,
                 APP_TITLE " " A7800_VERSION_STRING "\n\n"
                 "An Atari 7800 with a built-in FujiNet. No BIOS is needed.\n"
                 "The emulator is MAME's Atari 7800 (GPL-2.0-or-later; the a7800\n"
                 "driver BSD-3-Clause) by the MAME team, with the FujiNet cartridge.\n\n"
                 "Copyright (C) 2026 Thomas Cherryhomes -- GPL-3.0-or-later\n"
-                "https://fujinet.online/",
-                "About " APP_TITLE, MB_ICONINFORMATION | MB_OK);
+                "https://fujinet.online/\n\nDisplay: %s",
+                a7800_display_renderer());
+            memset(&mb, 0, sizeof mb);
+            mb.cbSize = sizeof mb;
+            mb.hwndOwner = hwnd;
+            mb.hInstance = (HINSTANCE)GetWindowLongPtr(hwnd, GWLP_HINSTANCE);
+            mb.lpszText = text;
+            mb.lpszCaption = "About " APP_TITLE;
+            mb.dwStyle = MB_OK | MB_USERICON;
+            mb.lpszIcon = MAKEINTRESOURCEA(IDI_APPICON);
+            MessageBoxIndirectA(&mb);
             return 0;
+        }
         case IDM_EXIT: PostMessage(hwnd, WM_CLOSE, 0, 0); return 0;
         default: break;
         }
@@ -1155,7 +1102,6 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
     (void)prev;
 
     InitCommonControlsEx(&icc);
-    InitializeCriticalSection(&g_fb_lock);
 
     g_session = a7800session_new(NULL);
     if (!g_session) {
@@ -1163,17 +1109,6 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
                     APP_TITLE, MB_ICONERROR | MB_OK);
         return 1;
     }
-    g_fb = calloc((size_t)A7800SESSION_FB_WIDTH * A7800SESSION_FB_MAX_HEIGHT, sizeof *g_fb);
-    if (!g_fb) return 1;
-
-    memset(&g_bmi, 0, sizeof g_bmi);
-    g_bmi.bmiHeader.biSize = sizeof g_bmi.bmiHeader;
-    g_bmi.bmiHeader.biWidth = A7800SESSION_FB_WIDTH;
-    g_bmi.bmiHeader.biHeight = -A7800SESSION_FB_MAX_HEIGHT;
-    g_bmi.bmiHeader.biPlanes = 1;
-    g_bmi.bmiHeader.biBitCount = 32;
-    g_bmi.bmiHeader.biCompression = BI_RGB;
-
     g_aspect = a7800session_get_int(g_session, "aspect", 0);
     g_smooth = a7800session_get_int(g_session, "smooth", 0);
 
@@ -1198,6 +1133,9 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
     g_statusbar = CreateWindowExA(0, STATUSCLASSNAMEA, "", WS_CHILD | WS_VISIBLE | SBARS_SIZEGRIP,
                                   0, 0, 0, 0, g_hwnd, (HMENU)(INT_PTR)IDC_STATUSBAR, inst, NULL);
     layout_statusbar();
+    a7800_display_set_options(g_aspect, g_smooth);
+    g_display = a7800_display_create(g_hwnd, g_session);
+    layout_display();
     ShowWindow(g_hwnd, show);
 
     a7800session_default_opts(g_session, &opts);
@@ -1224,8 +1162,6 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
     if (env_on("A7800_OPEN_DEBUGGER")) a7800_debugger_show(g_hwnd, g_session);
     if (env_on("A7800_OPEN_SETTINGS")) show_settings(inst);
 
-    g_present_thread = CreateThread(NULL, 0, present_thread, NULL, 0, NULL);
-
     while (GetMessage(&msg, NULL, 0, 0) > 0) {
         /* Before TranslateMessage, so the sub-windows' keys reach them
          * regardless of which child control has the focus. */
@@ -1235,14 +1171,8 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
         DispatchMessage(&msg);
     }
 
-    InterlockedExchange(&g_running, 0);
-    if (g_present_thread) {
-        WaitForSingleObject(g_present_thread, 2000);
-        CloseHandle(g_present_thread);
-    }
+    a7800_display_destroy();
     a7800session_stop(g_session);
     a7800session_free(g_session);
-    free(g_fb);
-    DeleteCriticalSection(&g_fb_lock);
     return (int)msg.wParam;
 }

@@ -24,6 +24,21 @@
   #include <timeapi.h>
 #endif
 
+#if defined(_WIN32)
+// MMCSS "Games": the scheduler's class for a thread that must keep a frame
+// clock; a busy desktop then doesn't make the emulation late.
+static void JoinMmcss()
+{
+	typedef HANDLE (WINAPI *AvFn)(LPCWSTR, LPDWORD);
+	HMODULE avrt = LoadLibraryW(L"avrt.dll");
+	AvFn fn = avrt ? (AvFn)(void (*)(void))GetProcAddress(avrt, "AvSetMmThreadCharacteristicsW") : nullptr;
+	DWORD index = 0;
+	if(!fn || !fn(L"Games", &index)) {
+		SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL);
+	}
+}
+#endif
+
 #include "MameHost.h"
 
 namespace {
@@ -242,6 +257,9 @@ void* MameHost::ThreadMain(void* self)
 void MameHost::ThreadBody()
 {
 	tOnEmulationThread = true;
+#if defined(_WIN32)
+	JoinMmcss();
+#endif
 	const int result = fngo_mame_run(_mame);
 
 	_running.store(false);
