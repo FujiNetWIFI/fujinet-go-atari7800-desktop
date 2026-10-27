@@ -53,7 +53,7 @@ modules:
   # (no network). Pre-built wheels, not sdists: PyYAML and MarkupSafe's C
   # extensions need a build backend pip can't reach offline (jinja2's own
   # backend, flit_core, isn't present either), and a wheel needs none --
-  # pip just unpacks it. Pinned to org.gnome.Sdk 49's python3 (3.13,
+  # pip just unpacks it. Pinned to org.gnome.Sdk 51's python3 (3.14,
   # confirmed from the sandbox's own traceback) x86_64 manylinux wheels;
   # installed to a fixed, python-version-independent path so the
   # fujinet-go-atari7800 module below can just PYTHONPATH at it.
@@ -64,11 +64,11 @@ modules:
         --target=/app/fujinet-pyshims PyYAML==6.0.3 MarkupSafe==3.0.3 Jinja2==3.1.6
     sources:
       - type: file
-        url: https://files.pythonhosted.org/packages/74/27/e5b8f34d02d9995b80abcef563ea1f8b56d20134d8f4e5e81733b1feceb2/pyyaml-6.0.3-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl
-        sha256: 0f29edc409a6392443abf94b9cf89ce99889a1dd5376d94316ae5145dfedd5d6
+        url: https://files.pythonhosted.org/packages/88/f9/16491d7ed2a919954993e48aa941b200f38040928474c9e85ea9e64222c3/pyyaml-6.0.3-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl
+        sha256: c458b6d084f9b935061bc36216e8a69a7e293a2f1e68bf956dcd9e6cbcd143f5
       - type: file
-        url: https://files.pythonhosted.org/packages/a9/21/9b05698b46f218fc0e118e1f8168395c65c8a2c750ae2bab54fc4bd4e0e8/markupsafe-3.0.3-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl
-        sha256: ccfcd093f13f0f0b7fdd0f198b90053bf7b2f02a3927a30e63f3ccc9df56b676
+        url: https://files.pythonhosted.org/packages/41/3c/a36c2450754618e62008bf7435ccb0f88053e07592e6028a34776213d877/markupsafe-3.0.3-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl
+        sha256: 457a69a9577064c05a97c41f4e65148652db078a3a509039e64d3467b9e7ef97
       - type: file
         url: https://files.pythonhosted.org/packages/62/a1/3d680cbfd5f4b8f15abc1d571870c5fc3e594bb582bc3b64ea099db13e56/jinja2-3.1.6-py3-none-any.whl
         sha256: 85ece4451f492d0c13c5dd7c13a64681a86afae63a5f347908daf103ce6d2f67
