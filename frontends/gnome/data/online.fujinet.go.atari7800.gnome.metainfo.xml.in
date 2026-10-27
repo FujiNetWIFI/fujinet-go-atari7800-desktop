@@ -3,7 +3,7 @@
   <id>online.fujinet.go.atari7800.gnome</id>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>GPL-3.0-or-later</project_license>
-  <name>FujiNet Go Atari 7800</name>
+  <name>FujiNet Go Atari 7800 (GNOME)</name>
   <summary>An Atari 7800 with a built-in FujiNet</summary>
   <description>
     <p>
@@ -35,32 +35,48 @@
     </p>
   </description>
   <launchable type="desktop-id">online.fujinet.go.atari7800.gnome.desktop</launchable>
+  <icon type="stock">online.fujinet.go.atari7800.gnome</icon>
+  <!-- Software centres classify from these, not from the .desktop
+       Categories= line; without them the app lands in no section at all. -->
+  <categories>
+    <category>Game</category>
+    <category>Emulator</category>
+  </categories>
   <url type="homepage">https://fujinet.online/</url>
   <url type="bugtracker">https://github.com/FujiNetWIFI/fujinet-go-atari7800-desktop/issues</url>
   <url type="vcs-browser">https://github.com/FujiNetWIFI/fujinet-go-atari7800-desktop</url>
   <developer id="online.fujinet">
-    <name>Thomas Cherryhomes</name>
+    <name>FujiNet</name>
   </developer>
   <content_rating type="oars-1.1"/>
   <screenshots>
     <screenshot type="default">
       <caption>The FujiNet CONFIG client browsing network hosts from the console</caption>
-      <image>https://raw.githubusercontent.com/FujiNetWIFI/fujinet-go-atari7800-desktop/main/data/screenshots/1_running_config.png</image>
+      <image>https://raw.githubusercontent.com/FujiNetWIFI/fujinet-go-atari7800-desktop/v0.3.1/data/screenshots/1_running_config.png</image>
     </screenshot>
     <screenshot>
       <caption>The built-in debugger: 6502 disassembly, MARIA, the cartridge and its FujiNet link</caption>
-      <image>https://raw.githubusercontent.com/FujiNetWIFI/fujinet-go-atari7800-desktop/main/data/screenshots/2_debugger.png</image>
+      <image>https://raw.githubusercontent.com/FujiNetWIFI/fujinet-go-atari7800-desktop/v0.3.1/data/screenshots/2_debugger.png</image>
     </screenshot>
     <screenshot>
       <caption>Preferences</caption>
-      <image>https://raw.githubusercontent.com/FujiNetWIFI/fujinet-go-atari7800-desktop/main/data/screenshots/3_preferences.png</image>
+      <image>https://raw.githubusercontent.com/FujiNetWIFI/fujinet-go-atari7800-desktop/v0.3.1/data/screenshots/3_preferences.png</image>
     </screenshot>
   </screenshots>
   <releases>
     <!-- The CURRENT release templates its version from @PROJECT_VERSION@, so
          it cannot disagree with the tree; past releases are literal. The
          release job checks that this first entry is still a template. -->
-    <release version="@PROJECT_VERSION@" date="2026-10-26">
+    <release version="@PROJECT_VERSION@" date="2026-10-27">
+      <description>
+        <p>
+          The Flatpak builds on the GNOME 51 runtime. The software-centre
+          listing now credits FujiNet as developer, declares the app icon,
+          and shows a full set of screenshots for each frontend.
+        </p>
+      </description>
+    </release>
+    <release version="0.3.0" date="2026-10-26">
       <description>
         <p>
           A machine reset (Power Cycle, Reboot to CONFIG) now silences
