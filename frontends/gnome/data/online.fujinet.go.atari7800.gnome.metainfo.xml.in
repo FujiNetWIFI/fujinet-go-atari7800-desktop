@@ -70,6 +70,13 @@
     <release version="@PROJECT_VERSION@" date="2026-10-27">
       <description>
         <p>
+          The Flatpak bundles now name Flathub as their runtime repository, so a downloaded bundle can fetch the GNOME or KDE runtime on a machine that has not set up Flathub.
+        </p>
+      </description>
+    </release>
+    <release version="0.3.1" date="2026-10-27">
+      <description>
+        <p>
           The Flatpak builds on the GNOME 51 runtime. The software-centre
           listing now credits FujiNet as developer, declares the app icon,
           and shows a full set of screenshots for each frontend.
