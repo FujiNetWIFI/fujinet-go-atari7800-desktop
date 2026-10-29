@@ -112,13 +112,17 @@ typedef struct {
     int analog_joystick;      /* gamepad sticks drive the joystick too */
     int hsc;                  /* games get the High Score Cart (needs its ROM) */
     int enable_fujinet;       /* start the in-process FujiNet runtime */
+    int external_fujinet;     /* 1: don't start it; the cartridge dials the
+                               * FujiNet at fujinet_addr instead */
+    const char *fujinet_addr; /* "host:port" or "port" (external only);
+                               * NULL/"" = 127.0.0.1:11510 */
     int enable_audio;         /* open the SDL audio device */
     int enable_gamepad;       /* start the SDL gamepad thread */
 } a7800session_start_opts;
 
 /* Fills opts from the settings store (keys: cart region port0_type
- * port1_type analog_joystick hsc enable_fujinet enable_audio
- * enable_gamepad). */
+ * port1_type analog_joystick hsc enable_fujinet fujinet_external
+ * fujinet_external_addr enable_audio enable_gamepad). */
 void a7800session_default_opts(a7800session *s, a7800session_start_opts *opts);
 
 /* Starts FujiNet (if enabled) and then the emulator.
@@ -408,7 +412,19 @@ void a7800session_sysaction_post(a7800session *s, int sysact);
 int  a7800session_sysaction_take(a7800session *s, int *out);
 
 /* ---- FujiNet -------------------------------------------------------------*/
+/* Parses the "Use external FujiNet" address field: "host:port" (host a name
+ * or an IPv4 literal) or a bare "port". Empty text means the default,
+ * 127.0.0.1:11510. Returns 0 and fills host/port, or -1 when the text is not
+ * an address:port (nothing is written then). */
+int         a7800session_parse_hostport(const char *text, char *host,
+                                        int hostsz, int *port);
 int         a7800session_fujinet_running(const a7800session *s);
+/* 1 when the session was started to dial another FujiNet instead of running
+ * its own. */
+int         a7800session_fujinet_external(const a7800session *s);
+/* "host:port" the cartridge dials (the running session's, or the default
+ * 127.0.0.1:11510 before the first start). */
+const char *a7800session_boip_endpoint(const a7800session *s);
 const char *a7800session_fujinet_webui_url(const a7800session *s);
 int         a7800session_fujinet_copy_log(a7800session *s, char *dst, int max);
 /* The cartridge's link to FujiNet: 1 up, 0 down, -1 not running. */

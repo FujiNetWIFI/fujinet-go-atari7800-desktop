@@ -749,8 +749,9 @@ extern "C" int a7800debug_fujinet_state(a7800debug* d, char* dst, int dstsz)
 	char buf[1024];
 	snprintf(buf, sizeof buf,
 	         "FujiNet     %s\n"
-	         "BoIP        127.0.0.1:%d\n",
-	         d->session->fujinet_running ? "running" : "off", A7800SESSION_BOIP_PORT);
+	         "BoIP        %s\n",
+	         d->session->fujinet_external ? "external" : d->session->fujinet_running ? "running" : "off",
+	         a7800session_boip_endpoint(d->session));
 	std::string s = buf;
 	if(!c.present) return put(dst, dstsz, s + "Cartridge   not running\n");
 	const std::string mode = c.mode == 1 ? "loading " + std::to_string(c.load_pct) + "%" : c.mode_name;

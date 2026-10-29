@@ -41,6 +41,8 @@
 #define IDC_SET_BIOS_NTSC  2013
 #define IDC_SET_BIOS_PAL   2014
 #define IDC_SET_HSC        2015
+#define IDC_SET_EXTERNAL   2016
+#define IDC_SET_EXT_ADDR   2017
 
 #define IDC_LOG_EDIT       2100
 #define IDC_STATUSBAR      2200

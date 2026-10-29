@@ -12,6 +12,8 @@
 #include <QFormLayout>
 #include <QGroupBox>
 #include <QLabel>
+#include <QLineEdit>
+#include <QMessageBox>
 #include <QSlider>
 #include <QStandardItemModel>
 #include <QTimer>
@@ -195,11 +197,32 @@ bool SettingsDialog::run(QWidget *parent, a7800session *session)
     QCheckBox *fuji = check("Enable FujiNet", "Run the in-process FujiNet the cartridge dials into. Off means no network and a link-down CONFIG client.", session, "enable_fujinet", 1);
     QCheckBox *snd = check("Audio", "Open the system audio device", session, "enable_audio", 1);
     QCheckBox *gp = check("Gamepads", "Poll USB/Bluetooth gamepads", session, "enable_gamepad", 1);
-    hform->addWidget(fuji); hform->addWidget(snd); hform->addWidget(gp);
+    QCheckBox *external = check("Use external FujiNet", "Skip the built-in FujiNet and dial another instance. Start that instance listening on this address (its [BOIP] port).", session, "fujinet_external", 0);
+    auto *externalAddr = new QLineEdit(QString::fromUtf8(a7800session_get_str(session, "fujinet_external_addr", "")));
+    externalAddr->setPlaceholderText(QStringLiteral("127.0.0.1:11510"));
+    externalAddr->setEnabled(external->isChecked());
+    QObject::connect(external, &QCheckBox::toggled, externalAddr, &QWidget::setEnabled);
+    auto *addrForm = new QFormLayout;
+    addrForm->addRow(QStringLiteral("Address:port"), externalAddr);
+    hform->addWidget(fuji); hform->addWidget(external); hform->addLayout(addrForm);
+    hform->addWidget(snd); hform->addWidget(gp);
     outer->addWidget(host);
 
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
-    QObject::connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+    QObject::connect(buttons, &QDialogButtonBox::accepted, &dlg, [&] {
+        char hostName[64];
+        int port;
+        if (external->isChecked() &&
+            a7800session_parse_hostport(externalAddr->text().trimmed().toUtf8().constData(), hostName,
+                                        sizeof hostName, &port) != 0) {
+            QMessageBox::warning(&dlg, QStringLiteral("External FujiNet"),
+                                 QStringLiteral("\"%1\" is not an address:port. Example: 127.0.0.1:11510")
+                                     .arg(externalAddr->text()));
+            externalAddr->setFocus();
+            return;
+        }
+        dlg.accept();
+    });
     QObject::connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
     outer->addWidget(buttons);
 
@@ -220,6 +243,15 @@ bool SettingsDialog::run(QWidget *parent, a7800session *session)
 
     bool changed = false;
     changed |= commit(session, "enable_fujinet", 1, fuji->isChecked() ? 1 : 0);
+    changed |= commit(session, "fujinet_external", 0, external->isChecked() ? 1 : 0);
+    {
+        const QByteArray addr = externalAddr->text().trimmed().toUtf8();
+        if (QString::fromUtf8(a7800session_get_str(session, "fujinet_external_addr", "")) !=
+            QString::fromUtf8(addr)) {
+            a7800session_set_str(session, "fujinet_external_addr", addr.constData());
+            changed = true;
+        }
+    }
     changed |= commit(session, "enable_audio", 1, snd->isChecked() ? 1 : 0);
     changed |= commit(session, "enable_gamepad", 1, gp->isChecked() ? 1 : 0);
     return changed;

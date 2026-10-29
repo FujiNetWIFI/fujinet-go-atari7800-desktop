@@ -215,7 +215,8 @@ static void update_status(void)
     } else {
         g_pad_notice[0] = '\0';
         snprintf(g_status_text, sizeof g_status_text, "FujiNet: %s%s", st,
-                 a7800session_fujinet_running(g_session) ? "" : " (runtime not running)");
+                 a7800session_fujinet_external(g_session) ? " (external)"
+                 : a7800session_fujinet_running(g_session) ? "" : " (runtime not running)");
     }
     g_status_link = a7800session_cart_link_up(g_session) == 1;
     SendMessageA(g_statusbar, SB_SETTEXTA, 0 | SBT_OWNERDRAW, (LPARAM)g_status_text);
@@ -434,6 +435,35 @@ static void settings_apply_checkbox(HWND hwnd, int id, const char *key, int def)
     }
 }
 
+#ifndef EM_SETCUEBANNER
+#define EM_SETCUEBANNER 0x1501
+#endif
+
+/* The external-FujiNet address, trimmed; returns 1 when it parses (empty
+ * means the default). */
+static int external_addr_text(HWND hwnd, char *addr, size_t addrsz)
+{
+    char host[64], *start = addr, *end;
+    int port;
+    GetDlgItemTextA(hwnd, IDC_SET_EXT_ADDR, addr, (int)addrsz);
+    while (*start == ' ' || *start == '\t') start++;
+    memmove(addr, start, strlen(start) + 1);
+    end = addr + strlen(addr);
+    while (end > addr && (end[-1] == ' ' || end[-1] == '\t')) *--end = '\0';
+    return a7800session_parse_hostport(addr, host, sizeof host, &port) == 0;
+}
+
+/* Valid text is saved and marks the session dirty; anything else is not. */
+static void settings_apply_external_addr(HWND hwnd)
+{
+    char addr[96];
+    if (!external_addr_text(hwnd, addr, sizeof addr)) return;
+    if (strcmp(a7800session_get_str(g_session, "fujinet_external_addr", ""), addr) != 0) {
+        a7800session_set_str(g_session, "fujinet_external_addr", addr);
+        g_settings_dirty = 1;
+    }
+}
+
 static void refresh_pad_list(void)
 {
     int i, n, sel;
@@ -572,6 +602,14 @@ static LRESULT CALLBACK settings_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             }
             return 0;
         case IDC_SET_FUJINET: settings_apply_checkbox(hwnd, IDC_SET_FUJINET, "enable_fujinet", 1); return 0;
+        case IDC_SET_EXTERNAL:
+            settings_apply_checkbox(hwnd, IDC_SET_EXTERNAL, "fujinet_external", 0);
+            EnableWindow(GetDlgItem(hwnd, IDC_SET_EXT_ADDR),
+                         SendDlgItemMessageA(hwnd, IDC_SET_EXTERNAL, BM_GETCHECK, 0, 0) == BST_CHECKED);
+            return 0;
+        case IDC_SET_EXT_ADDR:
+            if (HIWORD(wp) == EN_CHANGE) settings_apply_external_addr(hwnd);
+            return 0;
         case IDC_SET_AUDIO: settings_apply_checkbox(hwnd, IDC_SET_AUDIO, "enable_audio", 1); return 0;
         case IDC_SET_GAMEPAD: settings_apply_checkbox(hwnd, IDC_SET_GAMEPAD, "enable_gamepad", 1); return 0;
         default: break;
@@ -590,6 +628,16 @@ static LRESULT CALLBACK settings_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         }
         return 0;
     case WM_CLOSE:
+        {
+            char addr[96];
+            if (SendDlgItemMessageA(hwnd, IDC_SET_EXTERNAL, BM_GETCHECK, 0, 0) == BST_CHECKED &&
+                !external_addr_text(hwnd, addr, sizeof addr)) {
+                MessageBoxA(hwnd, "That is not an address:port.\n\nExample: 127.0.0.1:11510",
+                            "External FujiNet", MB_ICONWARNING);
+                SetFocus(GetDlgItem(hwnd, IDC_SET_EXT_ADDR));
+                return 0;
+            }
+        }
         DestroyWindow(hwnd);
         return 0;
     case WM_DESTROY:
@@ -731,6 +779,16 @@ static void show_settings(HINSTANCE inst)
     settings_label(g_settings_window, inst, "Host (applied by restarting the session)", 16, y, 460, 18); y += 22;
     settings_checkbox(g_settings_window, inst, "Enable FujiNet", IDC_SET_FUJINET, 16, y, 200,
                       a7800session_get_int(g_session, "enable_fujinet", 1)); y += 26;
+    settings_checkbox(g_settings_window, inst, "Use external FujiNet", IDC_SET_EXTERNAL, 16, y, 200,
+                      a7800session_get_int(g_session, "fujinet_external", 0)); y += 26;
+    settings_label(g_settings_window, inst, "Address:port:", 36, y + 3, 90, 18);
+    HWND addrEdit = CreateWindowExA(WS_EX_CLIENTEDGE, "EDIT", a7800session_get_str(g_session, "fujinet_external_addr", ""),
+                        WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL, 130, y, 240, 22,
+                        g_settings_window, (HMENU)(INT_PTR)IDC_SET_EXT_ADDR, inst, NULL);
+    SendMessageA(addrEdit, WM_SETFONT, (WPARAM)font, TRUE);
+    SendMessageA(addrEdit, EM_SETCUEBANNER, FALSE, (LPARAM)L"127.0.0.1:11510");
+    EnableWindow(addrEdit, a7800session_get_int(g_session, "fujinet_external", 0) != 0);
+    y += 28;
     settings_checkbox(g_settings_window, inst, "Audio", IDC_SET_AUDIO, 16, y, 200,
                       a7800session_get_int(g_session, "enable_audio", 1)); y += 26;
     settings_checkbox(g_settings_window, inst, "Gamepads", IDC_SET_GAMEPAD, 16, y, 200,
@@ -813,6 +871,11 @@ static LRESULT CALLBACK log_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 
 static void show_fujinet_log(HINSTANCE inst)
 {
+    if (a7800session_fujinet_external(g_session)) {
+        MessageBoxA(g_hwnd, "FujiNet is external: its console output is in the process that is running it.",
+                    "FujiNet", MB_ICONINFORMATION | MB_OK);
+        return;
+    }
     RECT rc;
     if (g_log_window) { SetForegroundWindow(g_log_window); return; }
     {
@@ -1033,6 +1096,11 @@ static LRESULT CALLBACK wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         case IDM_SETTINGS: show_settings((HINSTANCE)GetWindowLongPtr(hwnd, GWLP_HINSTANCE)); return 0;
         case IDM_FUJINET_LOG: show_fujinet_log((HINSTANCE)GetWindowLongPtr(hwnd, GWLP_HINSTANCE)); return 0;
         case IDM_FUJINET_CONFIG:
+            if (a7800session_fujinet_external(g_session)) {
+                MessageBoxA(hwnd, "FujiNet is external: use the web UI of the instance this app dials.",
+                            "FujiNet", MB_ICONINFORMATION | MB_OK);
+                return 0;
+            }
             if (!a7800session_fujinet_running(g_session)) {
                 MessageBoxA(hwnd, "FujiNet is not running.", "FujiNet", MB_ICONINFORMATION | MB_OK);
                 return 0;

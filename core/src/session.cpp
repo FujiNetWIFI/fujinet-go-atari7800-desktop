@@ -188,7 +188,8 @@ int restart_machine(struct a7800session* s)
 			cfg.romPath = s->roms_dir;
 			cfg.system = system_for(region);
 			cfg.bios = "none";
-			cfg.fujinetPort = A7800SESSION_BOIP_PORT;
+			cfg.fujinetHost = s->boip_host;
+			cfg.fujinetPort = s->boip_port;
 			cfg.fujinetDebug = getenv("A7800_FUJINET_DEBUG") != nullptr;
 			cfg.volume = a7800session_get_int(s, "volume", 100);
 			Cart& c = cart_of(s);
@@ -342,6 +343,8 @@ extern "C" void a7800session_default_opts(a7800session* s, a7800session_start_op
 	opts->analog_joystick = a7800session_get_int(s, "analog_joystick", 1);
 	opts->hsc = a7800session_get_int(s, "hsc", 0);
 	opts->enable_fujinet = a7800session_get_int(s, "enable_fujinet", 1);
+	opts->external_fujinet = a7800session_get_int(s, "fujinet_external", 0);
+	opts->fujinet_addr = a7800session_get_str(s, "fujinet_external_addr", nullptr);
 	opts->enable_audio = a7800session_get_int(s, "enable_audio", 1);
 	opts->enable_gamepad = a7800session_get_int(s, "enable_gamepad", 1);
 	opts->cart_path = a7800session_get_str(s, "cart", nullptr);
@@ -391,12 +394,33 @@ extern "C" int a7800session_start(a7800session* s, const a7800session_start_opts
 	// FujiNet FIRST: it listens and the cartridge dials in, so the listener
 	// has to exist before the machine's first transaction or the CONFIG
 	// client boots reporting no link. Failing to start is NOT fatal (the
-	// cartridge also keeps redialling).
-	if(opts->enable_fujinet)
+	// cartridge also keeps redialling). An external FujiNet is somebody
+	// else's listener: nothing starts here, the cartridge just dials it.
+	s->fujinet_external = 0;
+	snprintf(s->boip_host, sizeof s->boip_host, "127.0.0.1");
+	s->boip_port = A7800SESSION_BOIP_PORT;
+	snprintf(s->webui_url, sizeof s->webui_url, "http://127.0.0.1:%d/", A7800SESSION_WEBUI_PORT);
+	if(opts->external_fujinet)
+	{
+		if(a7800session_parse_hostport(opts->fujinet_addr, s->boip_host, sizeof s->boip_host,
+		                               &s->boip_port) != 0)
+		{
+			session_set_error(s, "\"%s\" is not an address:port for the external FujiNet "
+			                  "(example: 127.0.0.1:%d)",
+			                  opts->fujinet_addr ? opts->fujinet_addr : "", A7800SESSION_BOIP_PORT);
+			snprintf(s->boip_host, sizeof s->boip_host, "127.0.0.1");
+			s->boip_port = A7800SESSION_BOIP_PORT;
+			return -1;
+		}
+		s->fujinet_external = 1;
+		s->webui_url[0] = '\0';
+	}
+	else if(opts->enable_fujinet)
 	{
 		if(fujinet_start(s) == 0)
 			fujinet_wait_for_boip(s, 3000);
 	}
+	snprintf(s->boip_endpoint, sizeof s->boip_endpoint, "%s:%d", s->boip_host, s->boip_port);
 
 	const int region = wanted_region(s);
 	MameHost::Config cfg;
@@ -404,8 +428,8 @@ extern "C" int a7800session_start(a7800session* s, const a7800session_start_opts
 	cfg.romPath = s->roms_dir;
 	cfg.system = system_for(region);
 	cfg.bios = roms_bios_name(s, region);
-	cfg.fujinetHost = "127.0.0.1";
-	cfg.fujinetPort = A7800SESSION_BOIP_PORT;
+	cfg.fujinetHost = s->boip_host;
+	cfg.fujinetPort = s->boip_port;
 	cfg.fujinetDebug = getenv("A7800_FUJINET_DEBUG") != nullptr;
 	cfg.volume = a7800session_get_int(s, "volume", 100);
 	cfg.startStopped = getenv("A7800_START_STOPPED") != nullptr;
@@ -474,6 +498,7 @@ extern "C" void a7800session_stop(a7800session* s)
 	gamepad_stop(s);
 	host_of(s)->Stop();
 	fujinet_stop(s);
+	s->fujinet_external = 0;
 	s->running = 0;
 }
 
@@ -795,6 +820,85 @@ extern "C" void session_hsc_changed(struct a7800session* s)
 }
 
 // ---- FujiNet ---------------------------------------------------------------
+
+// A host name: letters, digits, '-', '_' and dots, no empty label. All-digit
+// text must be a dotted IPv4 address (the resolver reads "1.2" as one too).
+static bool host_valid(const char* host)
+{
+	const size_t len = strlen(host);
+	bool numeric = true;
+	if(len == 0 || len > 63 || host[0] == '.' || host[0] == '-' || host[len - 1] == '.')
+		return false;
+	for(size_t pos = 0; pos < len; pos++)
+	{
+		const char chr = host[pos];
+		const bool digit = chr >= '0' && chr <= '9';
+		if(!digit && chr != '.')
+			numeric = false;
+		if(!digit && chr != '.' && chr != '-' && chr != '_' && !(chr >= 'a' && chr <= 'z') &&
+		   !(chr >= 'A' && chr <= 'Z'))
+			return false;
+		if(chr == '.' && host[pos + 1] == '.')
+			return false;
+	}
+	if(numeric)
+	{
+		int oct[4], used = 0;
+		if(sscanf(host, "%d.%d.%d.%d%n", &oct[0], &oct[1], &oct[2], &oct[3], &used) != 4 || host[used])
+			return false;
+		for(int idx = 0; idx < 4; idx++)
+			if(oct[idx] < 0 || oct[idx] > 255) return false;
+	}
+	return true;
+}
+
+extern "C" int a7800session_parse_hostport(const char* text, char* host, int hostsz, int* port)
+{
+	char buf[80];
+	const char* name = "127.0.0.1";
+	long num = A7800SESSION_BOIP_PORT;
+
+	if(!text) text = "";
+	while(*text == ' ' || *text == '\t') text++;
+	size_t len = strlen(text);
+	while(len && (text[len - 1] == ' ' || text[len - 1] == '\t' || text[len - 1] == '\n' ||
+	              text[len - 1] == '\r'))
+		len--;
+	if(len >= sizeof buf) return -1;
+	memcpy(buf, text, len);
+	buf[len] = '\0';
+
+	if(len)
+	{
+		char* colon = strrchr(buf, ':');
+		const char* digits = buf;
+		char* end;
+		if(colon)
+		{
+			*colon = '\0';
+			name = buf;
+			digits = colon + 1;
+			if(!host_valid(name)) return -1;
+		}
+		if(!*digits) return -1;
+		num = strtol(digits, &end, 10);
+		if(*end || num < 1 || num > 65535) return -1;
+	}
+	if((int)strlen(name) >= hostsz) return -1;
+	memcpy(host, name, strlen(name) + 1);
+	*port = (int)num;
+	return 0;
+}
+
+extern "C" int a7800session_fujinet_external(const a7800session* s)
+{
+	return s->fujinet_external;
+}
+
+extern "C" const char* a7800session_boip_endpoint(const a7800session* s)
+{
+	return s->boip_endpoint[0] ? s->boip_endpoint : "127.0.0.1:11510";
+}
 
 extern "C" int a7800session_fujinet_running(const a7800session* s)
 {

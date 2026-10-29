@@ -802,12 +802,16 @@ void DebuggerWindow::refreshFujinet(bool force)
     const int n = a7800debug_fujinet_trace(m_dbg, p, A7800DEBUG_FUJI_TRACE_MAX);
     if (!a7800session_is_running(m_session)) {
         m_fujiNote->setText(QStringLiteral("The console is off."));
-    } else if (!a7800session_fujinet_running(m_session)) {
+    } else if (!a7800session_fujinet_running(m_session) && !a7800session_fujinet_external(m_session)) {
         m_fujiNote->setText(QStringLiteral("FujiNet is off (Preferences ▸ Enable FujiNet)."));
     } else {
         char status[160];
         a7800session_cart_status(m_session, status, sizeof status);
-        m_fujiNote->setText(QStringLiteral("FujiNet cartridge, %1.").arg(QString::fromUtf8(status)));
+        m_fujiNote->setText(QStringLiteral("%1 FujiNet at %2, cartridge %3.")
+                                .arg(a7800session_fujinet_external(m_session) ? QStringLiteral("External")
+                                                                              : QStringLiteral("Built-in"))
+                                .arg(QString::fromUtf8(a7800session_boip_endpoint(m_session)))
+                                .arg(QString::fromUtf8(status)));
     }
     state[0] = '\0';
     a7800debug_fujinet_state(m_dbg, state, sizeof state);

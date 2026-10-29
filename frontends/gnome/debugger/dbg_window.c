@@ -583,11 +583,13 @@ static void refresh_fujinet(DbgWin *w, gboolean force)
 
     if (!a7800session_is_running(w->session)) {
         g_strlcpy(note, "The console is off.", sizeof note);
-    } else if (!a7800session_fujinet_running(w->session)) {
+    } else if (!a7800session_fujinet_running(w->session) && !a7800session_fujinet_external(w->session)) {
         g_strlcpy(note, "FujiNet is off (Preferences \xe2\x96\xb8 Enable FujiNet).", sizeof note);
     } else {
         a7800session_cart_status(w->session, status, sizeof status);
-        g_snprintf(note, sizeof note, "FujiNet cartridge, %s.", status);
+        g_snprintf(note, sizeof note, "%s FujiNet at %s, cartridge %s.",
+                   a7800session_fujinet_external(w->session) ? "External" : "Built-in",
+                   a7800session_boip_endpoint(w->session), status);
     }
     gtk_label_set_text(w->fuji_note, note);
     a7800debug_fujinet_state(w->dbg, state, sizeof state);

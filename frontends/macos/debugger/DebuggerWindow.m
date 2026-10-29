@@ -1111,12 +1111,14 @@ static void appendStick(NSMutableString *s, uint8_t nibble)
     if (n < 0) n = 0;
     if (!a7800session_is_running(_session)) {
         _fujiNote.stringValue = @"The console is off.";
-    } else if (!a7800session_fujinet_running(_session)) {
+    } else if (!a7800session_fujinet_running(_session) && !a7800session_fujinet_external(_session)) {
         _fujiNote.stringValue = @"FujiNet is off (Settings ▸ Enable FujiNet).";
     } else {
         char status[160];
         a7800session_cart_status(_session, status, (int)sizeof status);
-        _fujiNote.stringValue = [NSString stringWithFormat:@"FujiNet cartridge, %@.",
+        _fujiNote.stringValue = [NSString stringWithFormat:@"%@ FujiNet at %s, cartridge %@.",
+                                 a7800session_fujinet_external(_session) ? @"External" : @"Built-in",
+                                 a7800session_boip_endpoint(_session),
                                  [NSString stringWithUTF8String:status] ?: @""];
     }
     state[0] = '\0';
