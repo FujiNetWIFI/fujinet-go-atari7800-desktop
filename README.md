@@ -84,6 +84,10 @@ deeper orange (`#F0932F`, the 2600's is `#FFA645`); the same orange is the UI
 accent, marking held buttons, the Map target, the current line in the
 disassembly and the FujiNet link.
 
+## External FujiNet
+
+A switch in Preferences makes the app connect to another FujiNet instance at a host:port you enter, e.g. `127.0.0.1:11510`, instead of starting the built-in one.
+
 ## Building
 
 ```sh
