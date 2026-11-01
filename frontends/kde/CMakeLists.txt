@@ -31,7 +31,7 @@ add_executable(fujinet-go-atari7800-kde
 target_link_libraries(fujinet-go-atari7800-kde PRIVATE a7800_session Qt6::Widgets Qt6::GuiPrivate)
 # The display's shaders, baked for every backend and embedded as resources.
 qt_add_shaders(fujinet-go-atari7800-kde "display_shaders"
-  PREFIX "/shaders"
+  PREFIX "/"
   FILES shaders/display.vert shaders/display.frag)
 # libmame_fngo, and the RPATH that finds it installed and in the build tree
 a7800_link_mame(fujinet-go-atari7800-kde)
