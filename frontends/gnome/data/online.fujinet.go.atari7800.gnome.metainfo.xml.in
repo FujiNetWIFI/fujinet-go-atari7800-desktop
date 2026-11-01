@@ -70,6 +70,13 @@
     <release version="@PROJECT_VERSION@" date="2026-11-01">
       <description>
         <p>
+          Lower CPU use: the picture is drawn only when the emulator has a new frame, and the display stops updating while the window is hidden. The built-in FujiNet wakes about a tenth as often when nothing is happening. Needs GTK 4.16 or newer.
+        </p>
+      </description>
+    </release>
+    <release version="0.4.1" date="2026-11-01">
+      <description>
+        <p>
           No GNOME changes; version kept in step with the KDE build, which fixes a see-through video area under KWin.
         </p>
       </description>
