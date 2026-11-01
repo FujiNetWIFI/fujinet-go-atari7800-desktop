@@ -58,13 +58,17 @@ void DisplayWidget::tick()
         return;
     if (h <= 0 || h > A7800SESSION_FB_MAX_HEIGHT) return;
 
-    /* The session's pixels are 0x00RRGGBB, which is exactly
-     * QImage::Format_RGB32 (the alpha byte is ignored); a straight copy. */
+    /* The pixels are 0x00RRGGBB; Format_RGB32 needs 0xFFRRGGBB, or KWin
+     * composites the zero alpha as see-through, so force alpha on. */
     if (m_height != h) {
         m_height = h;
         m_image = QImage(A7800SESSION_FB_WIDTH, h, QImage::Format_RGB32);
     }
-    std::memcpy(m_image.bits(), m_fb.data(), (size_t)A7800SESSION_FB_WIDTH * h * 4);
+    const size_t n = (size_t)A7800SESSION_FB_WIDTH * h;
+    quint32 *dst = reinterpret_cast<quint32 *>(m_image.bits());
+    const quint32 *src = reinterpret_cast<const quint32 *>(m_fb.data());
+    for (size_t i = 0; i < n; i++)
+        dst[i] = src[i] | 0xFF000000u;
     update();
 }
 
