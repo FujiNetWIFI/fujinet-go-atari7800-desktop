@@ -21,24 +21,27 @@ on:
 
 jobs:
   build-and-test:
+    # An Arch container, not ubuntu-latest: the frontends need Qt >= 6.7
+    # (QRhiWidget, the GPU display) and GTK >= 4.16 (GdkMemoryTextureBuilder),
+    # and ubuntu-latest (24.04) ships Qt 6.4 and GTK 4.14. A frontend whose
+    # toolkit is too old is skipped by CMake, so on the old image this job
+    # would go green having built nothing. The release packages are built on
+    # ubuntu-26.04 (release.yml), which has what they need and dpkg-deb.
     runs-on: ubuntu-latest
+    container: archlinux:latest
     env:
       LD_LIBRARY_PATH: /tmp/sdl3-install/lib
     steps:
-      - uses: actions/checkout@v4
-
       - name: Install build tools and frontend toolkits
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            build-essential cmake ninja-build python3 pkg-config git \
-            libgtk-4-dev libadwaita-1-dev \
-            qt6-base-dev libqt6opengl6-dev \
+          pacman -Syu --noconfirm --needed \
+            base-devel cmake ninja python pkgconf git \
+            gtk4 libadwaita qt6-base qt6-shadertools \
             desktop-file-utils appstream \
-            libx11-dev libxext-dev libxrandr-dev libxi-dev libxss-dev \
-            libxcursor-dev libxkbcommon-dev libwayland-dev libdrm-dev \
-            libgbm-dev libgl1-mesa-dev libpulse-dev libasound2-dev \
-            libxtst-dev
+            libx11 libxext libxrandr libxi libxss libxcursor libxkbcommon \
+            wayland wayland-protocols libdrm mesa libpulse alsa-lib libxtst
+
+      - uses: actions/checkout@v4
 
       # SDL3 is too new to assume an apt package; built from source and pinned
       # to the exact release the project is tested against.
