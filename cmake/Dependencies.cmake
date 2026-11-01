@@ -50,11 +50,14 @@ set(MAME_URL "https://github.com/tschak909/mame")
 set(MAME_ARCHIVE "${MAME_URL}/archive/${MAME_COMMIT}.tar.gz")
 set(MAME_ARCHIVE_SHA256 "511f12fdf06069020394520fd8ff30c8fa17e800058eaffaceccde434f999dee")
 
-# fujinet-firmware, branch tcp-protocol-disable-nagle (c68e86303): master plus
-# TCP_NODELAY on the BoIP listener's accepted socket. Recorded in three places
-# -- here and in both flatpak manifests (build-aux/flatpak/*.yml).
-set(FUJINET_COMMIT "c68e863034737611415ca568c3ea4607a2220c7e")
-set(FUJINET_URL "https://github.com/FujiNetWIFI/fujinet-firmware")
+# fujinet-firmware, fork branch boip-idle-wait-on-nodelay (81f9fdb3c): the old
+# pin (c68e86303, tcp-protocol-disable-nagle: master plus TCP_NODELAY on the
+# BoIP listener's accepted socket) plus the BoIP idle-wait fix (PR #2247; idle
+# wakeups ~1000/s -> ~100/s). Temporary: moves back to master when #2247
+# merges. The commit lives only on the fork, hence the fork URL. Recorded in
+# three places -- here and in both flatpak manifests (build-aux/flatpak/*.yml).
+set(FUJINET_COMMIT "81f9fdb3ce7bd7af9ef507282782085ad18fc16c")
+set(FUJINET_URL "https://github.com/tschak909/fujinet-firmware")
 
 # a7800_provide_dependency(NAME <n> PATH <p> SENTINEL <file> OVERRIDE <VAR>
 #                           RESULT <out>

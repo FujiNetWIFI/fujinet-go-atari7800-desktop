@@ -129,8 +129,8 @@ modules:
       # Pinned exactly as cmake/Dependencies.cmake. a7800_provide_dependency()
       # skips its own fetch once it finds build.sh (the SENTINEL) already here.
       - type: git
-        url: https://github.com/FujiNetWIFI/fujinet-firmware
-        commit: c68e863034737611415ca568c3ea4607a2220c7e
+        url: https://github.com/tschak909/fujinet-firmware
+        commit: 81f9fdb3ce7bd7af9ef507282782085ad18fc16c
         dest: third_party/fujinet-firmware
       # Same reasoning: the sandboxed build step has no network access, but
       # tools/fujinet/build-fujinet-desktop.sh needs mbedTLS 3.x and
