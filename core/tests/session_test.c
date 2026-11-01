@@ -38,11 +38,14 @@ static uint32_t px[A7800SESSION_FB_WIDTH * A7800SESSION_FB_MAX_HEIGHT];
 
 static int wait_frames(a7800session *s, uint64_t *serial, int count, int timeout_ms)
 {
-    int got = 0, waited = 0, h;
+    /* A frame identical to its predecessor is not published again (a still
+     * CONFIG screen publishes nothing), so count the machine's frames, not
+     * copy_frame's serial; the copy keeps the caller's serial current. */
+    uint64_t start = a7800session_frame_count(s);
+    int waited = 0, h;
     while (waited < timeout_ms) {
-        if (a7800session_copy_frame(s, px, &h, serial)) {
-            if (++got >= count) return 1;
-        }
+        a7800session_copy_frame(s, px, &h, serial);
+        if (a7800session_frame_count(s) >= start + (uint64_t)count) return 1;
         sleep_ms(2); waited += 2;
     }
     return 0;

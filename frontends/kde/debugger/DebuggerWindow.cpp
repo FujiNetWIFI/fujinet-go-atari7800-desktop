@@ -191,8 +191,8 @@ DebuggerWindow::DebuggerWindow(a7800session *session, QWidget *parent)
     root->addWidget(tabs, 1);
     setCentralWidget(central);
 
+    /* the refresh timer runs only while the window is on screen */
     connect(&m_timer, &QTimer::timeout, this, &DebuggerWindow::tick);
-    m_timer.start(100);
 }
 
 /* ---- building ------------------------------------------------------------- */
@@ -969,8 +969,15 @@ void DebuggerWindow::closeEvent(QCloseEvent *e)
 
 /* Hidden by F12, the close button or the main window: the engine goes
  * away and the machine runs on. */
+void DebuggerWindow::showEvent(QShowEvent *e)
+{
+    m_timer.start(100);
+    QMainWindow::showEvent(e);
+}
+
 void DebuggerWindow::hideEvent(QHideEvent *e)
 {
+    m_timer.stop();
     a7800debug_detach(m_dbg);
     QMainWindow::hideEvent(e);
 }

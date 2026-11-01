@@ -13,6 +13,7 @@
 #include <QPointer>
 #include <QScrollBar>
 #include <QTimer>
+#include <memory>
 #include <QUrl>
 #include <QVBoxLayout>
 
@@ -49,9 +50,14 @@ void fujinet_log_show(QWidget *parent, a7800session *session)
     layout->addWidget(view);
 
     auto *timer = new QTimer(win);
-    auto refresh = [view, session]() {
+    auto last = std::make_shared<QByteArray>();
+    auto refresh = [view, session, last]() {
         static char buf[128 * 1024];
         const int n = a7800session_fujinet_copy_log(session, buf, sizeof(buf));
+        const QByteArray now = n > 0 ? QByteArray(buf) : QByteArray("(no FujiNet output yet)");
+        if (now == *last)
+            return;   /* nothing new: leave the view alone */
+        *last = now;
         const bool atEnd = view->verticalScrollBar()->value() ==
                            view->verticalScrollBar()->maximum();
         view->setPlainText(n > 0 ? QString::fromUtf8(buf)

@@ -349,15 +349,35 @@ bool MameHost::Reconfigure(const std::string& system, const std::string& bios, s
 void MameHost::OnFrame(const uint32_t* xrgb, int width, int height, uint64_t frameNo, bool paced)
 {
 	if(xrgb && width > 0 && height > 0) {
-		std::lock_guard<std::mutex> lock(_frameLock);
-		const size_t n = (size_t)width * (size_t)height;
-		if(_frame.size() < n) {
-			_frame.resize(n);
+		bool changed = true;
+		{
+			std::lock_guard<std::mutex> lock(_frameLock);
+			const size_t n = (size_t)width * (size_t)height;
+			// A frame identical to the one in the slot is not a new frame: the
+			// serial stays and nobody is called. The console runs at 60 Hz
+			// whatever it shows, and CONFIG or a menu does not move, so
+			// without this the frontends would copy, upload and draw the
+			// same picture sixty times a second.
+			if(_frameSerial != 0 && (uint32_t)width == _frameWidth && (uint32_t)height == _frameHeight
+			   && memcmp(_frame.data(), xrgb, n * sizeof(uint32_t)) == 0) {
+				changed = false;
+			} else {
+				if(_frame.size() < n) {
+					_frame.resize(n);
+				}
+				memcpy(_frame.data(), xrgb, n * sizeof(uint32_t));
+				_frameWidth = (uint32_t)width;
+				_frameHeight = (uint32_t)height;
+				_frameSerial++;
+			}
 		}
-		memcpy(_frame.data(), xrgb, n * sizeof(uint32_t));
-		_frameWidth = (uint32_t)width;
-		_frameHeight = (uint32_t)height;
-		_frameSerial++;
+		_frameCount++;
+		if(changed) {
+			std::lock_guard<std::mutex> lock(_frameCbLock);
+			if(_frameCb) {
+				_frameCb(_frameCbCtx);
+			}
+		}
 	}
 	(void)frameNo;
 
@@ -372,6 +392,13 @@ void MameHost::OnFrame(const uint32_t* xrgb, int width, int height, uint64_t fra
 	if(paced && !_quit.load()) {
 		Pace();
 	}
+}
+
+void MameHost::SetFrameCallback(FrameCallback cb, void* ctx)
+{
+	std::lock_guard<std::mutex> lock(_frameCbLock);
+	_frameCb = cb;
+	_frameCbCtx = ctx;
 }
 
 bool MameHost::CopyFrame(uint32_t* dst, size_t maxPixels, uint32_t& width, uint32_t& height, uint64_t* serialInOut)

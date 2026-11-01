@@ -598,6 +598,16 @@ extern "C" int a7800session_copy_frame(a7800session* s, uint32_t* dst, int* heig
 	return 1;
 }
 
+extern "C" void a7800session_set_frame_callback(a7800session* s, a7800session_frame_cb cb, void* ctx)
+{
+	if(s->host) host_of(s)->SetFrameCallback(cb, ctx);
+}
+
+extern "C" uint64_t a7800session_frame_count(a7800session* s)
+{
+	return s->host ? host_of(s)->FrameCount() : 0;
+}
+
 extern "C" int a7800session_refresh_rate(a7800session* s)
 {
 	if(!s->host) return 60;

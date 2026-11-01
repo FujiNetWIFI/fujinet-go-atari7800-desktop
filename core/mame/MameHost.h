@@ -109,6 +109,16 @@ public:
 
 	// ---- video ----
 	bool CopyFrame(uint32_t* dst, size_t maxPixels, uint32_t& width, uint32_t& height, uint64_t* serialInOut);
+	// Called on the emulation thread right after each new frame is published,
+	// so a frontend with no frame clock can draw when there is something to
+	// draw. It must be quick and must not call back into the host; it runs
+	// with a lock held, so SetFrameCallback(nullptr, nullptr) waits for a call
+	// in flight and the context may be freed once it returns.
+	typedef void (*FrameCallback)(void* ctx);
+	void SetFrameCallback(FrameCallback cb, void* ctx);
+	// Frames the machine has run, including the ones identical to their
+	// predecessor (which are not published again).
+	uint64_t FrameCount() const { return _frameCount.load(); }
 	void NotifyVsync(int64_t frameTimeNs);
 	double GetFps() const;
 
@@ -184,6 +194,10 @@ private:
 	uint32_t _frameWidth = 320;
 	uint32_t _frameHeight = 224;
 	uint64_t _frameSerial = 0;
+	std::atomic<uint64_t> _frameCount { 0 };
+	std::mutex _frameCbLock;
+	FrameCallback _frameCb = nullptr;
+	void* _frameCbCtx = nullptr;
 	std::atomic<int> _frameRateMilli { 59958 };
 
 	// ---- pacing ----

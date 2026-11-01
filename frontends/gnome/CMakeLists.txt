@@ -11,7 +11,9 @@ if(NOT PkgConfig_FOUND)
   return()
 endif()
 
-pkg_check_modules(GTK4 IMPORTED_TARGET gtk4>=4.10)
+# GTK 4.16 for GdkMemoryTextureBuilder (the display reuses its GPU texture
+# frame to frame).
+pkg_check_modules(GTK4 IMPORTED_TARGET gtk4>=4.16)
 pkg_check_modules(ADW IMPORTED_TARGET libadwaita-1>=1.5)
 if(NOT GTK4_FOUND OR NOT ADW_FOUND)
   message(STATUS "gnome frontend: gtk4/libadwaita not found -- skipping")

@@ -696,6 +696,21 @@ static void refresh_all(DbgWin *w)
 }
 
 static void attach_and_refresh(DbgWin *w);
+static gboolean tick_refresh(gpointer ud);
+
+static void on_map(GtkWidget *win, gpointer ud)
+{
+    DbgWin *w = ud;
+    (void)win;
+    if (!w->timer) w->timer = g_timeout_add(100, tick_refresh, w);
+}
+
+static void on_unmap(GtkWidget *win, gpointer ud)
+{
+    DbgWin *w = ud;
+    (void)win;
+    if (w->timer) { g_source_remove(w->timer); w->timer = 0; }
+}
 
 static gboolean tick_refresh(gpointer ud)
 {
@@ -1443,7 +1458,10 @@ void a7800_debugger_show(GtkWindow *parent, a7800session *session)
     gtk_widget_add_controller(GTK_WIDGET(w->win), keys);
 
     attach_and_refresh(w);
-    w->timer = g_timeout_add(100, tick_refresh, w);
+    /* The refresh timer runs only while the window is on screen: close only
+     * hides it. */
+    g_signal_connect(w->win, "map", G_CALLBACK(on_map), w);
+    g_signal_connect(w->win, "unmap", G_CALLBACK(on_unmap), w);
     gtk_window_present(w->win);
 }
 

@@ -38,6 +38,7 @@ public:
 protected:
     void keyPressEvent(QKeyEvent *e) override;
     void closeEvent(QCloseEvent *e) override;
+    void showEvent(QShowEvent *e) override;
     void hideEvent(QHideEvent *e) override;
     bool eventFilter(QObject *obj, QEvent *e) override;
 
