@@ -65,7 +65,14 @@
     <!-- The CURRENT release templates its version from @PROJECT_VERSION@, so
          it cannot disagree with the tree; past releases are literal. The
          release job checks that this first entry is still a template. -->
-    <release version="@PROJECT_VERSION@" date="2026-11-01">
+    <release version="@PROJECT_VERSION@" date="2026-11-07">
+      <description>
+        <p>
+          Fixed a freeze when a gamepad trigger was pressed with the Controllers window open.
+        </p>
+      </description>
+    </release>
+    <release version="0.5.0" date="2026-11-01">
       <description>
         <p>
           Lower CPU use: the picture is drawn on the GPU (with a software fallback) only when the emulator has a new frame, and the display stops updating while the window is hidden. The built-in FujiNet wakes about a tenth as often when nothing is happening. Needs Qt 6.7 or newer.
