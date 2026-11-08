@@ -68,7 +68,14 @@
     <!-- The CURRENT release templates its version from @PROJECT_VERSION@, so
          it cannot disagree with the tree; past releases are literal. The
          release job checks that this first entry is still a template. -->
-    <release version="@PROJECT_VERSION@" date="2026-11-07">
+    <release version="@PROJECT_VERSION@" date="2026-11-08">
+      <description>
+        <p>
+          Built-in, searchable Help: Help menu (Ctrl+Shift+H, ⌘? on a Mac) and Help buttons in Preferences, the debugger and the console log open the topic for what they show.
+        </p>
+      </description>
+    </release>
+    <release version="0.5.1" date="2026-11-07">
       <description>
         <p>
           Fixed a freeze when a gamepad trigger was pressed with the Controllers window open.
