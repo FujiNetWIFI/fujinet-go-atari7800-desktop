@@ -16,6 +16,7 @@
 #include "prefs.h"
 
 #include "window.h"
+#include "help/help_window.h"
 
 typedef struct {
     A7800Window *window;
@@ -355,9 +356,11 @@ void a7800_prefs_show(A7800Window *parent, a7800session *session,
     adw_dialog_set_title(ADW_DIALOG(dialog), "Preferences");
     adw_dialog_set_content_width(ADW_DIALOG(dialog), 600);
     adw_preferences_page_set_title(page, "Machine");
+    adw_preferences_page_set_name(page, "Machine");
     adw_preferences_page_set_icon_name(page, "applications-games-symbolic");
 
     adw_preferences_group_set_title(console, "Console");
+    adw_preferences_group_set_header_suffix(console, a7800_help_button("prefs/Machine"));
     state->region_row = combo_row(state, "TV system", NULL, "region", A7800_REGION_AUTO,
                                   a7800_region_name, -3);
     update_region_subtitle(state);

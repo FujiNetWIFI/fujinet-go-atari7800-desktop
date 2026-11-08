@@ -27,7 +27,8 @@
       Both ProLine joysticks are on screen, gamepads are picked up as they
       are plugged in and out, the mouse aims the XG-1 light gun, and a native
       debugger shows the 6502, disassembly with breakpoints and watchpoints,
-      MARIA, the TIA, RIOT and POKEY, and the FujiNet cartridge.
+      MARIA, the TIA, RIOT and POKEY, and the FujiNet cartridge. Built-in,
+      searchable Help covers all of it.
     </p>
     <p>
       Nothing copyrighted is included: the only built-in program is

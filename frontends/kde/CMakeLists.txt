@@ -25,6 +25,7 @@ add_executable(fujinet-go-atari7800-kde
   KeyForward.cpp
   SettingsDialog.cpp
   FujiNetWindows.cpp
+  help/HelpWindow.cpp
   controllers/ControllersWindow.cpp
   debugger/DebuggerWindow.cpp
 )

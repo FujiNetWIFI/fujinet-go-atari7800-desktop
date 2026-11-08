@@ -31,6 +31,7 @@
 
 #include "a7800debug.h"
 #include "../window.h"
+#include "../help/help_window.h"
 
 #define DISASM_WINDOW 48
 #define MEM_ROWS 64             /* 1K of memory, 16 bytes a row */
@@ -1045,6 +1046,7 @@ static gboolean on_key(GtkEventControllerKey *c, guint keyval, guint code,
     DbgWin *w = ud;
     (void)c; (void)code;
     switch (keyval) {
+    case GDK_KEY_F1: a7800_help_for(w->win); return TRUE;
     case GDK_KEY_F5: on_run(NULL, w); return TRUE;
     case GDK_KEY_F7: on_step(NULL, w); return TRUE;
     case GDK_KEY_F8:
@@ -1375,9 +1377,18 @@ static GtkWidget *build_fujinet(DbgWin *w)
 }
 
 /* The FujiNet tab refreshes as it comes up; the others keep up anyway. */
+/* Help's contexts (a7800help.h), one per tab */
+static const char *const k_tab_contexts[] = {
+    "debugger/console", "debugger/cpu", "debugger/disassembly", "debugger/maria",
+    "debugger/io", "debugger/cart", "debugger/breakpoints", "debugger/fujinet",
+};
+
 static void on_switch_page(GtkNotebook *nb, GtkWidget *page, guint num, gpointer ud)
 {
+    DbgWin *hw = ud;
     (void)nb; (void)page;
+    if (num < G_N_ELEMENTS(k_tab_contexts))
+        a7800_help_set_context(hw->win, k_tab_contexts[num]);
     if (num == TAB_FUJINET) refresh_fujinet(ud, FALSE);
 }
 
@@ -1445,8 +1456,11 @@ void a7800_debugger_show(GtkWindow *parent, a7800session *session)
         const char *tab = g_getenv("A7800_DEBUGGER_TAB");
         if (tab && *tab) gtk_notebook_set_current_page(GTK_NOTEBOOK(notebook), atoi(tab));
     }
+    a7800_help_set_context(w->win, k_tab_contexts[gtk_notebook_get_current_page(GTK_NOTEBOOK(notebook)) > 0
+                                                  ? gtk_notebook_get_current_page(GTK_NOTEBOOK(notebook)) : 0]);
 
     header = adw_header_bar_new();
+    adw_header_bar_pack_end(ADW_HEADER_BAR(header), a7800_help_button(NULL));
     toolbar = adw_toolbar_view_new();
     adw_toolbar_view_add_top_bar(ADW_TOOLBAR_VIEW(toolbar), header);
     adw_toolbar_view_set_content(ADW_TOOLBAR_VIEW(toolbar), root);

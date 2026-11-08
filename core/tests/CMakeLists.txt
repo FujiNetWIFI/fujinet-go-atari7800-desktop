@@ -56,6 +56,12 @@ target_link_libraries(bindings_test PRIVATE a7800_session)
 a7800_link_mame(bindings_test)
 add_test(NAME bindings COMMAND bindings_test)
 
+# The built-in Help covers every setting, key, command and context.
+add_executable(help_test help_test.c)
+target_link_libraries(help_test PRIVATE a7800_session)
+a7800_link_mame(help_test)
+add_test(NAME help COMMAND help_test)
+
 # The external-FujiNet address field, pure.
 add_executable(hostport_test hostport_test.c)
 target_link_libraries(hostport_test PRIVATE a7800_session)

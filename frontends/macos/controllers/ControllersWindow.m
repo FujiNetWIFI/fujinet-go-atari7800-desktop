@@ -27,6 +27,7 @@
 #import "ControllersWindow.h"
 
 #import "../KeyForward.h"
+#import "../help/HelpWindow.h"
 
 #include <string.h>
 
@@ -218,6 +219,7 @@ static NSRect cell(CGFloat x, CGFloat top, int col, int row, CGFloat w)
                     backing:NSBackingStoreBuffered
                       defer:NO];
     [win setTitle:@"Controllers"];
+    A7800SetHelpContext(win, @"controllers");
     /* Floats above the machine's window and stays out of the way. */
     [win setLevel:NSFloatingWindowLevel];
     [win setReleasedWhenClosed:NO];
@@ -284,8 +286,13 @@ static NSRect cell(CGFloat x, CGFloat top, int col, int row, CGFloat w)
     [defaults setRefusesFirstResponder:YES];
     [content addSubview:defaults];
 
+    NSButton *helpBtn = A7800HelpButton(@"controllers");
+    [helpBtn setRefusesFirstResponder:YES];
+    [helpBtn setFrameOrigin:NSMakePoint(width - MARGIN - helpBtn.frame.size.width, y - 28)];
+    [content addSubview:helpBtn];
+
     _hint = [NSTextField labelWithString:@""];
-    [_hint setFrame:NSMakeRect(MARGIN + 176, y - 24, width - MARGIN - 190, 18)];
+    [_hint setFrame:NSMakeRect(MARGIN + 176, y - 24, width - MARGIN - 190 - helpBtn.frame.size.width - 6, 18)];
     [_hint setTextColor:[NSColor secondaryLabelColor]];
     [_hint setLineBreakMode:NSLineBreakByTruncatingTail];
     [content addSubview:_hint];

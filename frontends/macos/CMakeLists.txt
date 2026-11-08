@@ -22,6 +22,7 @@ add_executable(fujinet-go-atari7800-macos MACOSX_BUNDLE
   AppDelegate.m
   DisplayView.m
   KeyForward.m
+  help/HelpWindow.m
   controllers/ControllersWindow.m
   debugger/DebuggerWindow.m
   "${A7800_ICNS}"

@@ -14,6 +14,7 @@
  */
 
 #include "dbg_window.h"
+#include "../help/help_window.h"
 
 #include <commctrl.h>
 #include <commdlg.h>
@@ -44,7 +45,7 @@ enum {
 enum {
     IDC_RUN = 1000, IDC_STEP, IDC_OVER, IDC_OUT, IDC_FRAME, IDC_RUN_TO,
     IDC_STATUS, IDC_TABS,
-    IDC_PROMPT_OUT, IDC_PROMPT_IN, IDC_LOAD_SYMBOLS, IDC_SAVE,
+    IDC_PROMPT_OUT, IDC_PROMPT_IN, IDC_LOAD_SYMBOLS, IDC_SAVE, IDC_HELP_BTN,
     IDC_REG0, IDC_REG_LAST = IDC_REG0 + 5,
     IDC_FLAG0, IDC_FLAG_LAST = IDC_FLAG0 + 5,
     IDC_CYCLES, IDC_MEM_VIEW, IDC_MEM_BASE, IDC_MEM_ADDR, IDC_MEM_VAL,
@@ -62,7 +63,7 @@ enum {
 typedef struct {
     HWND hwnd;
     HWND tabs;
-    HWND run_btn, step_btn, over_btn, out_btn, frame_btn, run_to_btn, status;
+    HWND run_btn, step_btn, over_btn, out_btn, frame_btn, run_to_btn, help_btn, status;
 
     HWND prompt_out, prompt_in, load_symbols, save;
 
@@ -1070,9 +1071,11 @@ static void build_controls(debugger *d)
     d->frame_btn = button(d, "Frame", IDC_FRAME);
     d->run_to_btn = button(d, "Run To Cursor", IDC_RUN_TO);
     d->status = child(d, "STATIC", "Running", SS_RIGHT | SS_ENDELLIPSIS, IDC_STATUS, d->ui);
+    d->help_btn = button(d, "Help", IDC_HELP_BTN);
     {
-        HWND bar[7] = { d->run_btn, d->step_btn, d->over_btn, d->out_btn, d->frame_btn, d->run_to_btn, d->status };
-        for (i = 0; i < 7; i++) ShowWindow(bar[i], SW_SHOW);
+        HWND bar[8] = { d->run_btn, d->step_btn, d->over_btn, d->out_btn, d->frame_btn, d->run_to_btn, d->status,
+                        d->help_btn };
+        for (i = 0; i < 8; i++) ShowWindow(bar[i], SW_SHOW);
     }
 
     /* Console */
@@ -1147,8 +1150,17 @@ static void build_controls(debugger *d)
     d->fuji_state = mono_view(d, IDC_FUJI_STATE, 0);
 }
 
+/* Help's contexts (a7800help.h), one per tab */
+static const char *const k_tab_contexts[] = {
+    "debugger/console", "debugger/cpu", "debugger/disassembly", "debugger/maria",
+    "debugger/io", "debugger/cart", "debugger/breakpoints", "debugger/fujinet",
+};
+
 static void show_page(debugger *d, int page)
 {
+    /* Help, F1 and Ctrl+Shift+H open the tab's section */
+    if (page >= 0 && page < (int)(sizeof k_tab_contexts / sizeof k_tab_contexts[0]))
+        a7800_help_set_context(d->hwnd, k_tab_contexts[page], 1);
     HWND prompt[] = { d->prompt_out, d->prompt_in, d->load_symbols, d->save };
     HWND cpu[] = { d->cycles, d->mem_label, d->mem_base, d->mem_view, d->mem_addr_label, d->mem_addr,
                    d->mem_val_label, d->mem_val };
@@ -1189,7 +1201,8 @@ static void layout(debugger *d)
     MoveWindow(d->out_btn, bx, y, 110, 26, TRUE);     bx += 116;
     MoveWindow(d->frame_btn, bx, y, 70, 26, TRUE);    bx += 76;
     MoveWindow(d->run_to_btn, bx, y, 110, 26, TRUE);  bx += 116;
-    MoveWindow(d->status, bx, y + 5, client.right - bx - 8 > 40 ? client.right - bx - 8 : 40, 20, TRUE);
+    MoveWindow(d->help_btn, client.right - 8 - 72, y, 72, 26, TRUE);
+    MoveWindow(d->status, bx, y + 5, client.right - bx - 88 > 40 ? client.right - bx - 88 : 40, 20, TRUE);
 
     MoveWindow(d->tabs, 8, 40, client.right - 16, client.bottom - 48, TRUE);
     page = (RECT){ 8, 40, client.right - 8, client.bottom - 8 };
@@ -1402,6 +1415,7 @@ static LRESULT CALLBACK dbg_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         case IDC_TOGGLE_BP: toggle_selected_breakpoint(d); return 0;
         case IDC_LOAD_SYMBOLS: load_symbols(d); return 0;
         case IDC_SAVE: save_menu(d); return 0;
+        case IDC_HELP_BTN: a7800_help_for(d->hwnd); return 0;
         case IDC_FOLLOW_PC: refresh_disasm(d); return 0;
         case IDC_DISASM:
             if (HIWORD(wp) == LBN_SELCHANGE) {

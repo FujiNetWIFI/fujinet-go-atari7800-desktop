@@ -26,6 +26,7 @@ add_executable(fujinet-go-atari7800-gnome
   display.c
   prefs.c
   fujilog.c
+  help/help_window.c
   controllers/controllers_window.c
   debugger/dbg_window.c
 )

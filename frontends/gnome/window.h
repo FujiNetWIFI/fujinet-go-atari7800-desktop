@@ -16,6 +16,10 @@ GtkWidget *a7800_window_new(AdwApplication *app, a7800session *session);
 /* main.c: the icon name to use (the installed id, or the in-tree art). */
 const char *a7800_icon_name(void);
 void a7800_window_toast(A7800Window *self, const char *text);
+
+/* The Help context the main window shows now: "main", or "prefs/Machine"
+ * while Preferences is open. */
+const char *a7800_window_help_context(A7800Window *self);
 /* The display's shape: 0 = the television's 4:3, 1 = square pixels. */
 void a7800_window_apply_aspect(A7800Window *self, int aspect);
 

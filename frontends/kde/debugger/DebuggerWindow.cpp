@@ -22,13 +22,16 @@
 #include <QPointer>
 #include <QScrollBar>
 #include <QSplitter>
+#include <QShortcut>
 #include <QTabWidget>
+#include <QToolButton>
 #include <QTextBlock>
 #include <QTextCursor>
 #include <QVBoxLayout>
 #include <QWheelEvent>
 
 #include "../FujiNetWindows.h"
+#include "../help/HelpWindow.h"
 
 #define DISASM_WINDOW 48
 #define MEM_ROWS 64
@@ -185,9 +188,24 @@ DebuggerWindow::DebuggerWindow(a7800session *session, QWidget *parent)
                 break;
             }
     }
-    connect(tabs, &QTabWidget::currentChanged, this, [this](int page) {
+    /* a Help button for the tab that shows, and F1 */
+    auto *help = qobject_cast<QToolButton *>(a7800HelpButton(QString()));
+    help->setAutoRaise(false);
+    help->setText(QStringLiteral("Help"));
+    help->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    tabs->setCornerWidget(help, Qt::TopRightCorner);
+    static const char *const kHelpTabs[] = { "console", "cpu", "disassembly", "maria", "io", "cart",
+                                             "breakpoints", "fujinet" };
+    auto setContext = [this](int page) {
+        if (page >= 0 && page < (int)(sizeof kHelpTabs / sizeof kHelpTabs[0]))
+            setProperty("a7800HelpContext", QStringLiteral("debugger/%1").arg(QLatin1String(kHelpTabs[page])));
+    };
+    new QShortcut(QKeySequence(Qt::Key_F1), this, [this] { a7800HelpFor(this); });
+    connect(tabs, &QTabWidget::currentChanged, this, [this, setContext](int page) {
+        setContext(page);
         if (page == TAB_FUJINET) refreshFujinet(false);
     });
+    setContext(tabs->currentIndex());
     root->addWidget(tabs, 1);
     setCentralWidget(central);
 

@@ -60,6 +60,12 @@ desktop app, with no BIOS needed. A member of the FujiNet Go desktop family
   joystick, a light gun or nothing.
 - **The High Score Cart.** Import its ROM and switch it on in Preferences;
   the cartridge provides it, and keeps the scores through FujiNet.
+- **Built-in Help.** **Help ▸ FujiNet Go Atari 7800 Help** (Ctrl+Shift+H,
+  ⌘? on a Mac) opens a searchable Help, and the Help buttons in Preferences,
+  the Controllers window, the debugger and the console log open the topic for
+  what they show. The text is [data/help/help.md](data/help/help.md), which
+  GitHub shows as it is; the build embeds it and every frontend lays it out
+  natively.
 - **The debugger, in every frontend.** F12 opens it and stops the machine:
   Run/Stop (F5), Step (F7), Step Over (F8), Step Out (Shift+F8), Frame, Run
   to cursor. Tabs: the Console (MAME's own debugger commands — `bpset`,

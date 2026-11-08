@@ -11,6 +11,7 @@
 #import "KeyForward.h"
 #import "controllers/ControllersWindow.h"
 #import "debugger/DebuggerWindow.h"
+#import "help/HelpWindow.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -398,7 +399,24 @@
     [fujiItem setSubmenu:fuji];
     [bar addItem:fujiItem];
 
+    NSMenuItem *helpItem = [[NSMenuItem alloc] init];
+    NSMenu *help = [[NSMenu alloc] initWithTitle:@"Help"];
+    /* openHelp:, not showHelp: (AppKit's: "Help isn't available") */
+    [self item:help title:APP_TITLE @" Help" action:@selector(openHelp:) key:@"?"];
+    [helpItem setSubmenu:help];
+    [bar addItem:helpItem];
+
     [NSApp setMainMenu:bar];
+    [NSApp setHelpMenu:help];
+    /* the Help menu's search field finds the Help's sections too */
+    [NSApp registerUserInterfaceItemSearchHandler:[A7800HelpWindow shared]];
+}
+
+/* For the window in front: Settings, the debugger's tab ... */
+- (void)openHelp:(id)sender
+{
+    (void)sender;
+    [[A7800HelpWindow shared] showFor:[NSApp keyWindow]];
 }
 
 /* The difficulty switches can be flipped from the controllers panel and a
@@ -858,7 +876,16 @@
     _settingsWindow.title = @"Settings";
     _settingsWindow.releasedWhenClosed = NO;
     _settingsWindow.delegate = self;
-    _settingsWindow.contentView = root;
+    {
+        /* the settings over a strip with the Help button */
+        NSButton *helpBtn = A7800HelpButton(@"prefs/Machine");
+        NSStackView *wrap = [NSStackView stackViewWithViews:@[root, helpBtn]];
+        wrap.orientation = NSUserInterfaceLayoutOrientationVertical;
+        wrap.alignment = NSLayoutAttributeLeading;
+        wrap.edgeInsets = NSEdgeInsetsMake(0, 16, 12, 16);
+        _settingsWindow.contentView = wrap;
+        A7800SetHelpContext(_settingsWindow, @"prefs/Machine");
+    }
     [_settingsWindow center];
 
     _padGeneration = a7800session_gamepad_generation(_session);
@@ -938,9 +965,10 @@
         return;
     }
 
-    NSScrollView *scroll = [[NSScrollView alloc] initWithFrame:NSMakeRect(0, 0, 860, 600)];
+    NSScrollView *scroll = [[NSScrollView alloc] initWithFrame:NSMakeRect(0, 36, 860, 564)];
     scroll.hasVerticalScroller = YES;
     scroll.autohidesScrollers = NO;
+    scroll.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
 
     _logView = [[NSTextView alloc] initWithFrame:scroll.bounds];
     _logView.editable = NO;
@@ -958,7 +986,17 @@
     _logWindow.title = @"FujiNet Console Log";
     _logWindow.releasedWhenClosed = NO;
     _logWindow.delegate = self;
-    _logWindow.contentView = scroll;
+    {
+        /* the log over a strip with the Help button */
+        NSView *box = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 860, 600)];
+        NSButton *help = A7800HelpButton(@"fujilog");
+        [help setFrameOrigin:NSMakePoint(10, 6)];
+        help.autoresizingMask = NSViewMaxXMargin | NSViewMaxYMargin;
+        [box addSubview:scroll];
+        [box addSubview:help];
+        _logWindow.contentView = box;
+    }
+    A7800SetHelpContext(_logWindow, @"fujilog");
     [_logWindow center];
 
     _logTimer = [NSTimer scheduledTimerWithTimeInterval:1.0 target:self

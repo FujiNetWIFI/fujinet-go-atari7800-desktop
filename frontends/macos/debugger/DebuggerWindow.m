@@ -14,6 +14,7 @@
 #import "DebuggerWindow.h"
 
 #import "../KeyForward.h"
+#import "../help/HelpWindow.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -344,6 +345,8 @@ static void fill(NSStackView *stack, NSView *view)
 - (void)tabView:(NSTabView *)tabView didSelectTabViewItem:(NSTabViewItem *)item
 {
     (void)tabView;
+    /* The Help button and Command+? open the tab being shown. */
+    A7800SetHelpContext(_window, [@"debugger/" stringByAppendingString:item.identifier]);
     if ([_tabs indexOfTabViewItem:item] == TAB_FUJINET) [self refreshFujinet:NO];
 }
 
@@ -630,7 +633,9 @@ static void fill(NSStackView *stack, NSView *view)
     _status.alignment = NSTextAlignmentRight;
     _status.textColor = NSColor.secondaryLabelColor;
     _status.lineBreakMode = NSLineBreakByTruncatingTail;
-    NSStackView *toolbar = hstack(@[_runBtn, step, over, outBtn, frame, runTo, bp, _status]);
+    NSButton *helpBtn = A7800HelpButton(nil);
+    [helpBtn setRefusesFirstResponder:YES];
+    NSStackView *toolbar = hstack(@[_runBtn, step, over, outBtn, frame, runTo, bp, _status, helpBtn]);
     [_status setContentHuggingPriority:NSLayoutPriorityDefaultLow forOrientation:NSLayoutConstraintOrientationHorizontal];
     [_status setContentCompressionResistancePriority:NSLayoutPriorityDefaultLow
                                       forOrientation:NSLayoutConstraintOrientationHorizontal];
@@ -642,7 +647,10 @@ static void fill(NSStackView *stack, NSView *view)
                         @[@"Breakpoints & Watchpoints", [self buildBreaks]],
                         @[@"FujiNet", [self buildFujinet]] ];
     for (NSArray *page in pages) {
-        NSTabViewItem *item = [NSTabViewItem tabViewItemWithViewController:nil];
+        static const char *const kHelpTabs[] = { "console", "cpu", "disassembly", "maria", "io", "cart",
+                                                 "breakpoints", "fujinet" };
+        NSTabViewItem *item = [[NSTabViewItem alloc]
+            initWithIdentifier:@(kHelpTabs[[pages indexOfObject:page]])];
         item.label = page[0];
         NSView *content = page[1];
         NSView *holder = [[NSView alloc] init];
@@ -661,6 +669,7 @@ static void fill(NSStackView *stack, NSView *view)
         if (t >= 0 && t < (int)_tabs.numberOfTabViewItems) [_tabs selectTabViewItemAtIndex:t];
     }
     _tabs.delegate = self;
+    A7800SetHelpContext(_window, [@"debugger/" stringByAppendingString:_tabs.selectedTabViewItem.identifier]);
 
     NSStackView *root = vstack(@[toolbar, _tabs]);
     root.edgeInsets = NSEdgeInsetsMake(8, 8, 8, 8);

@@ -31,6 +31,7 @@
 #include "KeyForward.h"
 #include "SettingsDialog.h"
 #include "debugger/DebuggerWindow.h"
+#include "help/HelpWindow.h"
 #include "controllers/ControllersWindow.h"
 
 static const char *const kCartFilter =
@@ -42,6 +43,7 @@ MainWindow::MainWindow(a7800session *session, QWidget *parent)
     : QMainWindow(parent), m_session(session)
 {
     setWindowTitle(QStringLiteral("FujiNet Go Atari 7800"));
+    setProperty("a7800HelpContext", QStringLiteral("main"));
     /* 320x224 shown at 4:3, at 3x. */
     resize(896, 672 + 60);
     setAcceptDrops(true);
@@ -203,6 +205,18 @@ void MainWindow::buildMenus()
                         &MainWindow::showSettings);
 
     QMenu *help = menuBar()->addMenu(QStringLiteral("&Help"));
+    {
+        /* works from every window of the app (the Controllers window and the
+         * Debugger have the keyboard too) */
+        QAction *helpAct = help->addAction(QStringLiteral("FujiNet Go Atari 7800 &Help"));
+        helpAct->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_H));
+        helpAct->setShortcutContext(Qt::ApplicationShortcut);
+        addAction(helpAct);
+        connect(helpAct, &QAction::triggered, this, [this] {
+            a7800HelpFor(QApplication::activeWindow() ? QApplication::activeWindow() : this);
+        });
+    }
+    help->addSeparator();
     help->addAction(QStringLiteral("&About FujiNet Go Atari 7800"), this, &MainWindow::showAbout);
 }
 

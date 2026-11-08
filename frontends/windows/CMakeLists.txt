@@ -20,6 +20,7 @@ enable_language(RC)
 
 add_executable(fujinet-go-atari7800-windows WIN32
   main.c
+  help/help_window.c
   display.c
   controllers/controller_window.c
   debugger/dbg_window.c
