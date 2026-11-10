@@ -27,7 +27,7 @@ jobs:
     # toolkit is too old is skipped by CMake, so on the old image this job
     # would go green having built nothing. The release packages are built on
     # ubuntu-26.04 (release.yml), which has what they need and dpkg-deb.
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, fujinet-builder]
     container: archlinux:latest
     env:
       LD_LIBRARY_PATH: /tmp/sdl3-install/lib

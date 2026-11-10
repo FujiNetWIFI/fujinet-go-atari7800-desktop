@@ -7,13 +7,18 @@ name: macOS
 # written on a Mac, and nothing on the development machine can build
 # Objective-C against Cocoa. A failure here is real signal about that code.
 #
-# Two legs, as the release ships: macos-latest is Apple Silicon (arm64),
-# macos-15-intel is Intel (x86_64).
+# One job, on the org's self-hosted Tahoe runner (an Intel VM, no Homebrew),
+# building a UNIVERSAL (arm64 + x86_64) bundle: CMAKE_OSX_ARCHITECTURES in the
+# environment reaches every nested cmake run (SDL3, mbedTLS, the FujiNet
+# runtime). OpenSSL, which FujiNet's libssh links statically, is built here
+# for both architectures and lipo'd. The arm64 slice is built and checked but
+# cannot run on this runner; the tests exercise the x86_64 slice. There is no
+# separate Intel leg any more.
 #
-# WITH_FUJINET is left at its default ON: tools/fujinet/build-fujinet-desktop.sh
-# has Darwin handling (libfujinet.dylib, and it builds mbedTLS 3.6.5 from
-# source because Homebrew's is 4.x, which drops the mbedtls/md5.h the
-# firmware includes).
+# -DWITH_A7800_ROMS=OFF, as every published build. WITH_FUJINET is left at its
+# default ON: tools/fujinet/build-fujinet-desktop.sh has Darwin handling
+# (libfujinet.dylib, and it builds mbedTLS 3.6.5 from source because the
+# runner has no usable system copy).
 
 on:
   push:
@@ -23,38 +28,79 @@ on:
 
 jobs:
   build-and-test:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: arm64
-            runner: macos-latest
-          - arch: x86_64
-            runner: macos-15-intel
-    runs-on: ${{ matrix.runner }}
+    runs-on: [self-hosted, macOS, X64, tahoe]
     env:
-      DYLD_LIBRARY_PATH: /tmp/sdl3-install/lib
+      CMAKE_OSX_ARCHITECTURES: "arm64;x86_64"
+      CFLAGS: -Wno-error=unused-command-line-argument
+      CXXFLAGS: -Wno-error=unused-command-line-argument
     steps:
       - uses: actions/checkout@v4
 
+      # No Homebrew on the runner: cmake and ninja come from PyPI wheels in a
+      # venv. cmake is held below 4 because the vendored FujiNet subprojects
+      # (libssh, libsmb2, libnfs, mbedTLS) declare pre-3.5 minimums that
+      # cmake 4 rejects.
       - name: Install build tools
-        run: brew install cmake ninja python3
-
-      - name: Confirm the runner's architecture matches the matrix leg
         run: |
-          test "$(uname -m)" = "${{ matrix.arch }}" \
-            || { echo "::error::runner is $(uname -m), expected ${{ matrix.arch }}"; exit 1; }
+          python3 -m venv "$RUNNER_TEMP/tools"
+          "$RUNNER_TEMP/tools/bin/pip" install --quiet "cmake>=3.28,<4" ninja
+          echo "$RUNNER_TEMP/tools/bin" >> "$GITHUB_PATH"
 
-      - name: Build and install SDL3 (release-3.4.12, pinned)
+      # Some tools (the firmware's own tests) run the compiler directly, and
+      # the Xcode toolchain's clang only finds libc++ through an SDK path.
+      - name: Select the macOS SDK
+        run: echo "SDKROOT=$(xcrun --show-sdk-path)" >> "$GITHUB_ENV"
+
+      - name: Cache universal OpenSSL
+        id: openssl-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/openssl-universal
+          key: openssl-universal-3.5.0-${{ runner.os }}
+
+      - name: Build universal static OpenSSL (3.5.0, pinned commit)
+        if: steps.openssl-cache.outputs.cache-hit != 'true'
         run: |
+          COMMIT=636dfadc70ce26f2473870570bfd9ec352806b1d # openssl-3.5.0
+          SRC="$RUNNER_TEMP/openssl-src"
+          rm -rf "$SRC" && git init -q "$SRC"
+          git -C "$SRC" fetch -q --depth 1 https://github.com/openssl/openssl.git "$COMMIT"
+          git -C "$SRC" checkout -q FETCH_HEAD
+          test "$(git -C "$SRC" rev-parse HEAD)" = "$COMMIT"
+          DEST="$RUNNER_TEMP/openssl-universal"
+          for arch in arm64 x86_64; do
+            rm -rf "$RUNNER_TEMP/openssl-$arch"
+            cp -R "$SRC" "$RUNNER_TEMP/openssl-$arch"
+            (cd "$RUNNER_TEMP/openssl-$arch" &&
+             ./Configure darwin64-$arch-cc no-shared no-tests \
+               --prefix="$RUNNER_TEMP/openssl-$arch-inst" --libdir=lib &&
+             make -j"$(sysctl -n hw.ncpu)" build_libs &&
+             make install_dev)
+          done
+          mkdir -p "$DEST/lib"
+          cp -R "$RUNNER_TEMP/openssl-x86_64-inst/include" "$DEST/include"
+          for lib in libcrypto.a libssl.a; do
+            lipo -create "$RUNNER_TEMP/openssl-arm64-inst/lib/$lib" \
+                         "$RUNNER_TEMP/openssl-x86_64-inst/lib/$lib" \
+                 -output "$DEST/lib/$lib"
+          done
+
+      - name: Point the FujiNet build at the universal OpenSSL
+        run: echo "OPENSSL_ROOT_DIR=$RUNNER_TEMP/openssl-universal" >> "$GITHUB_ENV"
+
+      # Static, so the bundle has no non-system library dependency. Installed
+      # under RUNNER_TEMP: the runner has no passwordless sudo.
+      - name: Build and install static SDL3 (release-3.4.12, pinned)
+        run: |
+          rm -rf sdl3-src
           git clone --depth 1 --branch release-3.4.12 \
-            https://github.com/libsdl-org/SDL.git /tmp/sdl3-src
-          cmake -S /tmp/sdl3-src -B /tmp/sdl3-build -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_INSTALL_PREFIX=/tmp/sdl3-install \
-            -DSDL_SHARED=ON -DSDL_STATIC=OFF -DSDL_TEST_LIBRARY=OFF
-          cmake --build /tmp/sdl3-build
-          cmake --install /tmp/sdl3-build
+            https://github.com/libsdl-org/SDL.git sdl3-src
+          cmake -S sdl3-src -B sdl3-src/build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release -DSDL_SHARED=OFF -DSDL_STATIC=ON \
+            -DSDL_TEST_LIBRARY=OFF -DCMAKE_INSTALL_PREFIX="$RUNNER_TEMP/sdl3"
+          cmake --build sdl3-src/build
+          cmake --install sdl3-src/build
+          echo "CMAKE_PREFIX_PATH=$RUNNER_TEMP/sdl3" >> "$GITHUB_ENV"
 
       # MAME is the long pole (about nine hundred files): its pinned source
       # and MAME's own objects are cached per pin, so later runs only relink.
@@ -65,15 +111,15 @@ jobs:
           path: |
             third_party/mame
             build/mame
-          key: mame-macos-${{ matrix.arch }}-${{ hashFiles('cmake/Dependencies.cmake', 'cmake/BuildMame.cmake') }}
+          key: mame-macos-x86_64-${{ hashFiles('cmake/Dependencies.cmake', 'cmake/BuildMame.cmake') }}
 
       # RelWithDebInfo rather than the default Release: same optimisation
       # class, but a crash on a runner we cannot sit at gets line numbers.
       - name: Configure
         run: |
           cmake -B build -G Ninja \
-            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-            -DCMAKE_PREFIX_PATH=/tmp/sdl3-install
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_OSX_ARCHITECTURES=x86_64 \
+            -DWITH_A7800_ROMS=OFF
 
       - name: Build
         run: cmake --build build
@@ -92,6 +138,29 @@ jobs:
         working-directory: build
         run: ctest --output-on-failure
 
+      # The app is built for x86_64 above and tested; this builds the arm64 half
+      # (MAME cross-built for arm64 by cmake/BuildMame.cmake; it cannot run on this Intel
+      # runner) and merges it into the same bundle.
+      - name: Restore MAME for arm64 (objects)
+        id: mame-cache-arm64
+        uses: actions/cache/restore@v4
+        with:
+          path: build-arm64/mame
+          key: mame-macos-arm64-${{ hashFiles('cmake/Dependencies.cmake', 'cmake/BuildMame.cmake') }}
+
+      - name: Add the arm64 slices
+        run: |
+          .github/workflows/macos-add-arm64.sh "frontends/macos/FujiNet Go Atari 7800.app" \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo -DWITH_A7800_ROMS=OFF
+
+      # saved even when a later step fails: the MAME build is what is expensive
+      - name: Save MAME for arm64 (objects)
+        if: always() && steps.mame-cache-arm64.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: build-arm64/mame
+          key: ${{ steps.mame-cache-arm64.outputs.cache-primary-key }}
+
       # A crash on a Mac we cannot sit at is only diagnosable with a
       # backtrace: re-run every failing test under lldb and print it.
       - name: Backtraces for failed tests
@@ -103,8 +172,5 @@ jobs:
             exe=$(ctest -V -R "^$t$" -N 2>/dev/null | sed -n 's/^[0-9]*: Test command: *//p' | head -1 | tr -d '"')
             [ -x "$exe" ] || continue
             echo "=== $t ($exe) ==="
-            # (no coreutils `timeout` on macOS; the crashes are immediate)
-            lldb --batch \
-              -o "settings set target.env-vars DYLD_LIBRARY_PATH=/tmp/sdl3-install/lib" \
-              -o "run" -o "bt all" -o "register read" -o "quit" -- "$exe" 2>&1 | tail -120 || true
+            lldb --batch -o "run" -o "bt all" -o "register read" -o "quit" -- "$exe" 2>&1 | tail -120 || true
           done

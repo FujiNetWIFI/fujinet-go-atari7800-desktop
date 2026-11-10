@@ -89,6 +89,15 @@ else()
       list(APPEND _mame_args "ARCHOPTS=-fPIC")
     endif()
   endif()
+  if(APPLE AND CMAKE_OSX_ARCHITECTURES STREQUAL "arm64" AND CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
+    # arm64 built on an Intel Mac (the universal CI build): MAME builds its own tools for the host
+    # (CROSS_BUILD) and the library for arm64
+    list(FILTER _mame_args EXCLUDE REGEX "^ARCHOPTS=")
+    list(APPEND _mame_args PLATFORM=arm64 CROSS_BUILD=1
+         "ARCHOPTS=-arch arm64 -fPIC -mmacosx-version-min=${CMAKE_OSX_DEPLOYMENT_TARGET}"
+         "OVERRIDE_CC=clang -arch arm64" "OVERRIDE_CXX=clang++ -arch arm64"
+         "OVERRIDE_LD=clang++ -arch arm64")
+  endif()
   if(CMAKE_CROSSCOMPILING AND WIN32)
     # a MinGW cross build from Linux (cmake/toolchains/mingw-w64.cmake)
     # (PTR64/MINGW64 are what an MSYS2 shell's MSYSTEM would set)

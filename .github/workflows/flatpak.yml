@@ -28,16 +28,26 @@ jobs:
         manifest:
           - build-aux/flatpak/online.fujinet.go.atari7800.gnome.yml
           - build-aux/flatpak/online.fujinet.go.atari7800.kde.yml
-    runs-on: ubuntu-latest
+    # Self-hosted, in a container. --privileged: flatpak-builder's bubblewrap
+    # sandbox needs user namespaces, which the default container profile blocks.
+    runs-on: [self-hosted, Linux, X64, fujinet-builder]
+    container:
+      image: ubuntu:24.04
+      options: --privileged --add-host=host.docker.internal:host-gateway
     steps:
-      - uses: actions/checkout@v4
-
       - name: Install flatpak and flatpak-builder
+        shell: bash
         run: |
-          sudo apt-get update
-          sudo apt-get install -y flatpak flatpak-builder
+          MIRROR=http://mirrors.edge.kernel.org/ubuntu
+          (echo > /dev/tcp/host.docker.internal/3142) 2>/dev/null \
+            && MIRROR=http://host.docker.internal:3142/mirrors.edge.kernel.org/ubuntu
+          sed -i "s|http://[a-z.]*ubuntu.com/ubuntu|$MIRROR|" /etc/apt/sources.list.d/ubuntu.sources
+          apt-get update
+          apt-get install -y --no-install-recommends git ca-certificates curl flatpak flatpak-builder elfutils unzip
           flatpak remote-add --if-not-exists --user flathub \
             https://dl.flathub.org/repo/flathub.flatpakrepo
+
+      - uses: actions/checkout@v4
 
       - name: Install the runtime and SDK this manifest targets
         run: |
