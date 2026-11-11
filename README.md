@@ -68,16 +68,20 @@ desktop app, with no BIOS needed. A member of the FujiNet Go desktop family
   natively.
 - **The debugger, in every frontend.** F12 opens it and stops the machine:
   Run/Stop (F5), Step (F7), Step Over (F8), Step Out (Shift+F8), Frame, Run
-  to cursor. Tabs: the Console (MAME's own debugger commands — `bpset`,
-  `wpset` with conditions, `print`, `dump`, `find`, `trace` … plus `cart`,
-  `maria` and `labels`, with Tab completion), CPU & Memory (editable),
-  Disassembly (toggle breakpoints, follow PC, labels from ld65/ca65/plain
-  symbol files), MARIA (control register decoded, the display list list,
-  the palettes), I/O (INPTCTRL, TIA sound, RIOT ports, INPT0-5, POKEY),
-  Cartridge (link, mode, hand-over, load progress, mapper, HSC),
-  Breakpoints & Watchpoints, and FujiNet (every FujiBus packet on the
-  cartridge's link, both ways, with hex, traced from power-on). The engine
-  is MAME's.
+  to cursor. A registers strip with editable PC, SP, A, X, Y and flags sits
+  under twelve tabs, and any tab can Pop Out into its own window: the Console
+  (MAME's own debugger commands -- `bpset`, `wpset` with conditions that can
+  use `old` and `value`, `print`, `dump`, `trace` ... plus `cart`, `video`,
+  `maria`, `watch`, `find` and `labels`, with Tab completion), Disassembly
+  (breakpoint dots, follow PC, labels), Memory (labelled regions, Go To,
+  poke, hex and text search), Breakpoints (with hit counts), Watches, Cart &
+  I/O (the link, mapper, memory map, INPTCTRL, RIOT, INPT0-5), Trace and
+  History (every instruction run, with registers), Video (MARIA's display
+  list objects and zones, DMA time, palette and control changes per line, a
+  pixel inspector that finds the objects covering a pixel), Sound (TIA and
+  POKEY), Symbols (ld65, VICE, ca65), and FujiNet (every FujiBus packet on
+  the cartridge's link, both ways, with hex, traced from power-on). The
+  engine is MAME's.
 - **Gamepads that come and go.** SDL3 hot-plug: a pad plugged in while a game
   runs is assigned to the next free player within a second, unplugging
   releases it, and a pad that comes back gets its player back; each event is
