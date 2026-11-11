@@ -25,6 +25,7 @@ add_executable(fujinet-go-atari7800-macos MACOSX_BUNDLE
   help/HelpWindow.m
   controllers/ControllersWindow.m
   debugger/DebuggerWindow.m
+  debugger/VideoTab.m
   "${A7800_ICNS}"
 )
 set_source_files_properties("${A7800_ICNS}" PROPERTIES
