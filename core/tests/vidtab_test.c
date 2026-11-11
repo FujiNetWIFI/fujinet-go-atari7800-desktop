@@ -130,16 +130,23 @@ int main(void)
     pic = a7800vid_tab_picture(t, &w, &h);
     CHECK(pic && w == FBW && h == FBH, "Decoded is the frame's size");
     {
-        const uint32_t box1 = console(cap.lines[VIS_TOP + 20].palette[2 * 4 + 1]);
-        const uint32_t box2 = console(cap.lines[VIS_TOP + 40].palette[5 * 4 + 1]);
-        CHECK(pic && pic[20 * w + 40] == box1 && pic[20 * w + 71] == box1, "object 1 fills cells 20-35: pixels 40-71 of its rows");
-        CHECK(pic && pic[20 * w + 39] != box1 && pic[20 * w + 72] != box1, "and nothing outside it");
-        CHECK(pic && pic[16 * w + 40] == box1 && pic[31 * w + 71] == box1, "on every row of its zone");
-        CHECK(pic && pic[15 * w + 40] != box1 && pic[32 * w + 40] != box1, "not above or below the zone");
-        CHECK(pic && pic[40 * w + 120] == box2 && pic[40 * w + 127] == box2 && pic[40 * w + 128] != box2 && pic[40 * w + 119] != box2,
+        const uint32_t rgb1 = console(cap.lines[VIS_TOP + 20].palette[2 * 4 + 1]);
+        const uint32_t rgb2 = console(cap.lines[VIS_TOP + 40].palette[5 * 4 + 1]);
+        const uint32_t dim = 0xff000000u | (((0x12u * 106) >> 8) << 16) | (((0x34u * 106) >> 8) << 8) | ((0x56u * 106) >> 8);
+        /* the tint: 90/256 of the object's colour over the dimmed frame */
+        const uint32_t tint = 0xff000000u | ((((dim >> 16 & 255) * 166 + (rgb1 >> 16 & 255) * 90) >> 8) << 16) |
+                              ((((dim >> 8 & 255) * 166 + (rgb1 >> 8 & 255) * 90) >> 8) << 8) |
+                              (((dim & 255) * 166 + (rgb1 & 255) * 90) >> 8);
+        CHECK(pic && pic[5 * w + 5] == dim, "the rest of the frame is the dimmed capture");
+        CHECK(pic && pic[20 * w + 50] == tint && pic[24 * w + 60] == tint, "object 1's inside is the dimmed frame tinted with its colour");
+        CHECK(pic && pic[20 * w + 50] != rgb1, "...not an opaque fill");
+        CHECK(pic && pic[20 * w + 39] == dim && pic[20 * w + 72] == dim && pic[15 * w + 50] == dim && pic[32 * w + 50] == dim,
+              "nothing outside its extent: cells 20-35, pixels 40-71, rows 16-31");
+        CHECK(pic && pic[20 * w + 40] != tint && pic[20 * w + 40] != dim && pic[20 * w + 71] == pic[20 * w + 40], "a left and right outline");
+        CHECK(pic && pic[16 * w + 50] != tint && pic[16 * w + 50] != dim && pic[31 * w + 50] == pic[16 * w + 50], "a top and bottom outline");
+        CHECK(pic && pic[40 * w + 120] != dim && pic[40 * w + 127] == pic[40 * w + 120] && pic[40 * w + 128] == dim && pic[40 * w + 119] == dim,
               "a write mode object is 2 cells a byte: two bytes are 4 cells, 8 pixels");
-        CHECK(pic && pic[5 * w + 5] != 0x00123456u && (pic[5 * w + 5] & 0xff) < 0x56 && pic[5 * w + 5] != 0xff000000u,
-              "the rest of the frame is the dimmed capture");
+        CHECK(pic && pic[40 * w + 120] != pic[20 * w + 40] && rgb1 != rgb2, "each object's outline is in its own colour");
     }
 
     /* ---- Zones ---- */

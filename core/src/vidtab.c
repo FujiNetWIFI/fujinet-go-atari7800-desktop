@@ -29,6 +29,7 @@
 #define DMA_BUDGET 426
 #define DMA_LINE 454
 #define SWATCH_PX 24
+#define OBJECT_TINT 90          /* of 256: an object box tints the dimmed frame */
 #define DEFAULT_W 320
 #define DEFAULT_H 224
 
@@ -571,6 +572,8 @@ static void dim_frame(a7800vid_tab *t)
     }
 }
 
+static int has_object(const a7800vid_line *ln, const a7800vid_object *o);
+
 static int build_base(a7800vid_tab *t)
 {
     const a7800vid_capture *c = t->cap;
@@ -630,7 +633,13 @@ static int build_base(a7800vid_tab *t)
                     obj_span(t, ln, &ln->obj[i], &x0, &x1);
                     if (x1 > x0) {
                         const uint32_t rgb = reg_rgb(t, ln, ln->obj[i].palette * 4 + 1);
-                        for (int x = x0; x < x1; x++) t->base[(size_t)y * (size_t)w + (size_t)x] = rgb;
+                        /* neighbouring objects get a brighter / darker outline */
+                        const uint32_t edge = (i & 1) ? blend(rgb, 0x000000, 90) : blend(rgb, 0xffffff, 110);
+                        uint32_t *row = &t->base[(size_t)y * (size_t)w];
+                        const int top = !has_object(row_line(c, y - 1), &ln->obj[i]);
+                        const int bottom = !has_object(row_line(c, y + 1), &ln->obj[i]);
+                        for (int x = x0; x < x1; x++)
+                            row[x] = (top || bottom || x == x0 || x == x1 - 1) ? edge : blend(row[x], rgb, OBJECT_TINT);
                     }
                 }
             }
