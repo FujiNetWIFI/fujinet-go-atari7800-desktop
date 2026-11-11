@@ -51,6 +51,12 @@ extern "C" {
  * (tools/icons/make-icons.py). */
 #define A7800SESSION_ACCENT_RGB 0xF0932F
 
+/* The app's accent colour (the debugger's Run button, the current line, the
+ * FujiNet status dot): the orange of the icon. */
+#define A7800SESSION_ACCENT_RGB 0xF0932F
+/* 60% of the accent: ink (glyph strokes) drawn on an accent-filled control. */
+#define A7800SESSION_ACCENT_DARK_RGB 0x90581C
+
 typedef struct a7800session a7800session;
 typedef struct a7800debug a7800debug;
 
