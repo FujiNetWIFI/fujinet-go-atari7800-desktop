@@ -29,6 +29,7 @@ add_executable(fujinet-go-atari7800-gnome
   help/help_window.c
   controllers/controllers_window.c
   debugger/dbg_window.c
+  debugger/dbg_video.c
 )
 target_link_libraries(fujinet-go-atari7800-gnome
   PRIVATE a7800_session PkgConfig::GTK4 PkgConfig::ADW)
