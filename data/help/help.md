@@ -416,8 +416,9 @@ switches), and `bindings` (the controls that differ from the defaults).
 # Debugger
 
 The Debugger (<kbd>F12</kbd>) stops the console and shows what it is doing.
-It has eight tabs; closing it lets the console go on as it was. The engine is
-MAME's.
+It has twelve tabs; closing it lets the console go on as it was. The 6502's
+registers and flags sit in a strip under the tabs: edit a value while stopped
+and press <kbd>Enter</kbd>. The engine is MAME's.
 
 | Button | Does |
 |---|---|
@@ -427,57 +428,147 @@ MAME's.
 | Step Out (<kbd>Shift+F8</kbd>) | On until the routine returns |
 | Frame | On to the next frame |
 | Run to Cursor | On to the line selected in the Disassembly |
+| Clear Breakpoints | Removes every breakpoint |
+| Break at | A symbol name or hex address, then <kbd>Enter</kbd> |
+| Load Symbols | Reads an ld65 or VICE label file, a ca65 `.dbg` or a plain list |
+| Clear Symbols | Drops loaded symbols |
+| Save | Saves the disassembly, RAM or the whole memory to a file |
+| Pop Out | Moves the tab that shows into a window of its own; **Dock** in that window puts it back |
+| Help | Opens the topic of the tab that shows |
+
+Every stop brings the views back to where the machine is, even if you had
+scrolled away, and the line at the top says why it stopped.
 
 <!-- context: debugger/console -->
 ## Console
 
 MAME's own debugger commands: `bpset`, `wpset` with conditions, `print`,
-`dump`, `find`, `trace` and the rest, with <kbd>Tab</kbd> completion, plus
-three of this app's own:
+`dump`, `trace` and the rest, with <kbd>Tab</kbd> completion, plus this app's
+own. A condition can use `old`, what a write is about to replace, and `value`,
+what it writes.
 
 | Command | Does |
 |---|---|
 | `cart` | The cartridge: link, mode, hand-over, load progress, mapper |
-| `maria` | MARIA's control register and the display list |
+| `video` | The Video tab as text: `video registers`, `video colours`, `video lines` |
+| `maria` | MARIA's control register and the display list list |
+| `watch`, `unwatch` | The watch list: `watch score`, `unwatch 0` |
+| `find` | Searches memory for bytes (`find A9 00`) or text (`find text HELLO`) |
 | `labels` | Loads a symbol file |
-
-<!-- context: debugger/cpu -->
-## CPU and memory
-
-The 6502's registers and flags, and an editable hex view of memory. RAM is
-$1800 to $27FF (zero page and the stack mirror $2040 and $2140). Click a
-value to edit it while stopped.
 
 <!-- context: debugger/disassembly -->
 ## Disassembly
 
-The 6502 disassembled at the PC, with the opcode bytes, labels and the
-breakpoints in the margin. Click a line to select it, double-click or press
-<kbd>F9</kbd> to toggle its breakpoint. Follow PC keeps the current line in
-view. Labels come from ld65, ca65 or plain symbol files.
+The 6502 disassembled at the PC, with the opcode bytes and labels. The current
+instruction is in the app's accent colour and a breakpoint is a red dot in the
+margin (a grey hollow one when it is disabled); click a line to toggle its
+breakpoint. **Follow PC** keeps the current line in view. Symbols come from
+ld65, VICE and ca65 files.
 
-<!-- context: debugger/maria -->
-## MARIA
+<!-- context: debugger/memory -->
+## Memory
 
-MARIA's control register decoded, the display list and the display list list,
-and the palettes: BACKGRND, then P0 to P7 (colours 1 to 3 each).
-
-<!-- context: debugger/io -->
-## I/O
-
-INPTCTRL, the TIA's sound, the RIOT's ports, INPT0 to INPT5 and POKEY.
-
-<!-- context: debugger/cart -->
-## Cartridge
-
-The cartridge: the link, the mode, the hand-over, the load progress, the
-mapper, and the High Score Cart.
+The 64K the 6502 sees, 16 bytes to a row, each row labelled with what answers
+there (RAM and its mirrors, the TIA, MARIA, the RIOT, the cartridge). **Go To**
+takes an address, a label, an expression or a range (`$1800-$18FF`,
+`score..score+3`) and highlights what it found. **Poke** writes bytes. The
+search bar finds hex bytes (`A9 00`) or text (not case-sensitive) with **Find
+Next** and **Find Previous**, wrapping once; the machine has to be stopped.
+RAM is $1800 to $27FF; zero page and the stack mirror $2040 and $2140.
 
 <!-- context: debugger/breakpoints -->
-## Breakpoints and watchpoints
+## Breakpoints
 
-The list of breakpoints and watchpoints with their conditions. **Add**,
-**Remove**, and the check box to turn one off.
+Every breakpoint and watchpoint. **Add** one with a type, an address or range
+and, if you like, a condition:
+
+- **Execute** stops before an instruction runs.
+- **Read**, **Write** and **Access** (both) stop after the instruction that
+  touched memory, and the line at the top says what it did, for instance
+  `wrote $1840 = $41 (was $40)`.
+
+A condition can use `value` and `addr`, and `old`, what was there before:
+`value != old` stops only when a write changes something. The box beside each
+entry turns it off, and the list shows how many times it fired. **Clear Hits**
+zeroes the counts and **Clear Breakpoints** removes them all.
+
+<!-- context: debugger/watches -->
+## Watches
+
+Things to keep an eye on: type an address, a symbol, an expression or a range
+and press <kbd>Enter</kbd>. Each shows its value while the machine is stopped
+(`-` while it runs, `?` if it means nothing yet, which a later **Load Symbols**
+may fix). **Show in Memory** jumps to it in the Memory tab, **Break on Change**
+adds a Write breakpoint that fires when its value changes, and **Remove**
+drops it.
+
+<!-- context: debugger/cart -->
+## Cart and I/O
+
+The cartridge: the link, the mode, the hand-over, the load progress, the mapper
+and the High Score Cart. Under it the memory map as the console sees it, then
+INPTCTRL, the RIOT's ports, INPT0 to INPT5 and the controllers in each port.
+
+<!-- context: debugger/trace -->
+## Trace
+
+Every instruction the 6502 runs, live. **Record** turns it on (it slows the
+console a little, so it starts off), **Clear** empties it, **Branches only**
+shows just the jumps, calls and returns, and **In range** only a range of
+addresses. Trace and History share one recording.
+
+<!-- context: debugger/history -->
+## History
+
+The same recording, read at a stop: the lead-up to a breakpoint or a pause,
+newest at the bottom, with the registers at each instruction. Turn **Record**
+on before you run to the place you want to look at.
+
+<!-- context: debugger/video -->
+## Video
+
+MARIA, with the picture on the left and five sections on the right. MARIA
+draws each line from a display list that the game keeps changing, and the
+palettes and the control register change between lines, so the console records
+what each line was drawn with and the views use it.
+
+| View | Shows |
+|---|---|
+| Display | The last finished frame, as the screen showed it |
+| Decoded | The display lists made visible; a chooser picks the objects (each one's box in its palette), the zones or the palette |
+| Beam | Stopped only: this frame as far as the beam has drawn it, the last one dimmed below |
+| Values | The raw colours: the palette number and the colour in it, for every pixel |
+
+**Zoom** goes from 1 to 16 times, or **Fit**. **Overlays** switch on the zone
+boundaries (the display list list), the lines where a display list interrupt
+fires, a box on every object, how much DMA time each line used (hot lines are
+the ones that run out), the beam, the lines where the palette or the control
+register changed, and the outline of the active display.
+
+Point at a pixel to see it in **Pixel**: its zone, the display list objects
+that cover it (topmost first, with their header address and bytes), the
+graphics address, the palette and the colour. Click to pin it, click again to
+let go. Double-click it, or press **Break on writes**, to stop the machine when
+anything writes that object's header or its palette register.
+
+**Registers** decodes CTRL, DPP, CHARBASE, BACKGRND and MSTAT; one that changed
+in the last few refreshes is highlighted. **Colours** shows the 32 palette
+registers with the pixels that use them; **Break on writes** stops the machine
+when one is written. **Lines** lists the lines where the zone, the palette, the
+control register or the display list list pointer change. **Timing** shows the
+beam and the DMA budget.
+
+<!-- context: debugger/sound -->
+## Sound
+
+The TIA's two sound channels, and POKEY's four and its control register when the
+cartridge has one.
+
+<!-- context: debugger/symbols -->
+## Symbols
+
+Every known symbol. **Filter** narrows the list, and activating a row goes to
+that address in the Disassembly.
 
 <!-- context: debugger/fujinet -->
 ## FujiNet packets
