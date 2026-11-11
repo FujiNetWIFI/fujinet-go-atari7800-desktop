@@ -71,6 +71,13 @@
     <release version="@PROJECT_VERSION@" date="2026-11-10">
       <description>
         <p>
+          No changes to the app. Building from source now replaces an outdated MAME checkout when the pinned version moves, instead of compiling against the old one.
+        </p>
+      </description>
+    </release>
+    <release version="0.7.0" date="2026-11-10">
+      <description>
+        <p>
           Debugger rebuilt like the other FujiNet Go desktops: Console, Disassembly, Memory, Breakpoints, Watches, Cart &amp; I/O, Trace, History, Video, Sound, Symbols and FujiNet tabs, a registers strip with editable flags, breakpoints on memory with conditions (value, addr, old), memory search, watches, symbols, and Pop Out. The Video tab shows what MARIA drew each line from: the display list objects and zones, DMA time, palettes and control changes, with a pixel inspector.
         </p>
       </description>
