@@ -92,7 +92,24 @@ function(a7800_provide_dependency)
 
   set(_path "${CMAKE_SOURCE_DIR}/${DEP_PATH}")
 
-  if(NOT EXISTS "${_path}/${DEP_SENTINEL}" AND DEP_ARCHIVE)
+  # An unpacked archive remembers which archive it came from: a re-pin must
+  # replace it, not leave a developer building the old sources (the sentinel
+  # alone says only that SOME version is there).
+  set(_stamp "${_path}/.a7800-archive-sha256")
+  set(_stale FALSE)
+  if(DEP_ARCHIVE AND EXISTS "${_path}/${DEP_SENTINEL}")
+    set(_have "")
+    if(EXISTS "${_stamp}")
+      file(READ "${_stamp}" _have)
+      string(STRIP "${_have}" _have)
+    endif()
+    if(NOT _have STREQUAL "${DEP_SHA256}")
+      message(STATUS "${DEP_NAME}: ${DEP_PATH} is not the pinned archive; unpacking the pin")
+      set(_stale TRUE)
+    endif()
+  endif()
+
+  if(DEP_ARCHIVE AND (_stale OR NOT EXISTS "${_path}/${DEP_SENTINEL}"))
     # 2a. Archive dependency: download the pin and unpack it.
     #
     # Extract into a scratch directory first and move the result into place
@@ -104,6 +121,14 @@ function(a7800_provide_dependency)
     # cannot be renamed into the source tree.
     get_filename_component(_parent "${_path}" DIRECTORY)
     set(_tmp "${_parent}/.${DEP_NAME}-extract")
+
+    # A download cached by an earlier pin is not this one.
+    if(EXISTS "${_dl}")
+      file(SHA256 "${_dl}" _dl_hash)
+      if(NOT _dl_hash STREQUAL "${DEP_SHA256}")
+        file(REMOVE "${_dl}")
+      endif()
+    endif()
 
     if(NOT EXISTS "${_dl}")
       message(STATUS "${DEP_NAME}: downloading ${DEP_ARCHIVE}")
@@ -143,6 +168,7 @@ function(a7800_provide_dependency)
       message(FATAL_ERROR "${DEP_NAME}: could not move the unpacked archive "
                           "into ${_path}: ${_mv}")
     endif()
+    file(WRITE "${_stamp}" "${DEP_SHA256}\n")
 
   elseif(NOT EXISTS "${_path}/${DEP_SENTINEL}")
     find_package(Git QUIET)
