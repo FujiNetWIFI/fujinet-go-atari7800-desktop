@@ -1546,9 +1546,9 @@ extern "C" int a7800debug_command(a7800debug* d, const char* command, char* dst,
 		}
 		// drop what was printed before (stop messages): the prompt shows the
 		// command's own output
-		fngo_mame_console_text(m, &seq, text.data(), (int)text.size());
+		read_console(m, &seq, text);
 		const int rc = fngo_mame_debug_command(m, cmd.c_str());
-		fngo_mame_console_text(m, &seq, text.data(), (int)text.size());
+		read_console(m, &seq, text);
 		{
 			std::lock_guard<std::mutex> lock(d->mutex);
 			d->console_seq = seq;

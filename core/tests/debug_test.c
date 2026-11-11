@@ -232,6 +232,15 @@ int main(void)
         a7800debug_cpu_set(d, A7800_REG_SP, sp);
     }
 
+    /* the PC moves too (the next instruction to run, not the one fetched) */
+    {
+        const int pc = c.pc;
+        a7800debug_cpu_set(d, A7800_REG_PC, 0x2400);
+        a7800debug_cpu_get(d, &c);
+        check(c.pc == 0x2400, "the PC is editable");
+        a7800debug_cpu_set(d, A7800_REG_PC, pc);
+    }
+
     /* MARIA */
     {
         a7800debug_maria m;

@@ -92,8 +92,8 @@ modules:
       - /include
     sources:
       - type: archive
-        url: https://github.com/tschak909/mame/archive/8eace40af0bca7f4bb9f3f34c9ca61779416f372.tar.gz
-        sha256: ad3d9999dea19e69ddf68f4c037670a7f5ee14af5abcd327384eff80c6ae39e4
+        url: https://github.com/tschak909/mame/archive/dc37f0ce55315d6b16d639b5e89561af1b28e496.tar.gz
+        sha256: eb0a181296855c22a2999234b556c12a482bd8bffd1e32dd43cfe20861c5d423
 
   - name: fujinet-go-atari7800
     buildsystem: cmake-ninja

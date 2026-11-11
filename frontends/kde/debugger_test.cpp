@@ -81,9 +81,7 @@ int pcOf(a7800debug *d)
     return c.pc;
 }
 
-/* a7800debug_cpu_set(A7800_REG_PC) is ignored by a stopped 6502 (the fork sets
- * STATE_GENPC, but MAME has fetched the opcode already): MAME's own `pc=`
- * assignment does move it. */
+/* Moves the PC through MAME's own `pc=` assignment. */
 void setPc(a7800debug *d, unsigned pc)
 {
     char out[64];
@@ -626,9 +624,7 @@ private slots:
         QCOMPARE(regs.size(), 6);                   /* PC SP A X Y PS */
         QTRY_COMPARE_WITH_TIMEOUT(regs[0]->text(), QStringLiteral("2405"), 2000);   /* PC */
         typeInto(regs[0], QStringLiteral("240A"));
-        QEXPECT_FAIL("", "core: a7800debug_cpu_set(PC) is ignored on a stopped 6502", Continue);
         QCOMPARE(pcOf(m_d), 0x240A);
-        setPc(m_d, 0x240A);
         typeInto(regs[2], QStringLiteral("34"));    /* A */
         a7800debug_cpu c;
         a7800debug_cpu_get(m_d, &c);
