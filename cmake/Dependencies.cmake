@@ -169,6 +169,13 @@ function(a7800_provide_dependency)
                           "into ${_path}: ${_mv}")
     endif()
     file(WRITE "${_stamp}" "${DEP_SHA256}\n")
+    if(_stale)
+      # The archive's file times are the pin's commit time, which can be older
+      # than objects a build tree made from the previous pin: make would then
+      # call them up to date. Everything that was replaced counts as new.
+      file(GLOB_RECURSE _unpacked "${_path}/*")
+      file(TOUCH_NOCREATE ${_unpacked})
+    endif()
 
   elseif(NOT EXISTS "${_path}/${DEP_SENTINEL}")
     find_package(Git QUIET)
