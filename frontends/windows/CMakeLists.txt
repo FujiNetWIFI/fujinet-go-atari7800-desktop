@@ -24,6 +24,7 @@ add_executable(fujinet-go-atari7800-windows WIN32
   display.c
   controllers/controller_window.c
   debugger/dbg_window.c
+  debugger/dbg_video.c
   resource.rc
 )
 target_include_directories(fujinet-go-atari7800-windows PRIVATE
