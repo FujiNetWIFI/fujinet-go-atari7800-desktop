@@ -40,6 +40,12 @@ static void JoinMmcss()
 #endif
 
 #include "MameHost.h"
+#include "a7800vidcap.h"
+
+static_assert(sizeof(a7800vid_line) == sizeof(fngo_maria_line), "a7800vidcap.h mirrors fngo_maria_line");
+static_assert(sizeof(a7800vid_object) == sizeof(fngo_maria_object), "a7800vidcap.h mirrors fngo_maria_object");
+static_assert(A7800VID_LINES == FNGO_MARIA_LINES && A7800VID_OBJECTS == FNGO_MARIA_OBJECTS && A7800VID_CELLS == FNGO_MARIA_CELLS,
+              "a7800vidcap.h mirrors the fork's capture sizes");
 
 namespace {
 
@@ -372,6 +378,15 @@ void MameHost::OnFrame(const uint32_t* xrgb, int width, int height, uint64_t fra
 			}
 		}
 		_frameCount++;
+		if(_capUsers.load() > 0) {
+			// before the frontend is told, so what it draws has its capture
+			std::lock_guard<std::mutex> lock(_capLock);
+			if(_cap) {
+				FillCapture(_cap.get(), xrgb, width, height);
+				_cap->beam_row = _cap->fb_h;        // a finished frame: every row
+				_cap->serial++;
+			}
+		}
 		if(changed) {
 			std::lock_guard<std::mutex> lock(_frameCbLock);
 			if(_frameCb) {
@@ -392,6 +407,93 @@ void MameHost::OnFrame(const uint32_t* xrgb, int width, int height, uint64_t fra
 	if(paced && !_quit.load()) {
 		Pace();
 	}
+}
+
+// ---- the Video tab's capture ----
+
+// Emulation thread. xrgb: the frame to take (NULL: the last published one).
+void MameHost::FillCapture(a7800vid_capture* dst, const uint32_t* xrgb, int width, int height)
+{
+	if(!_capTmp) {
+		_capTmp.reset(new fngo_maria_capture);
+	}
+	fngo_maria_capture* tmp = _capTmp.get();
+	memset(tmp, 0, sizeof *tmp);
+	if(!_mame || !fngo_mame_maria_capture(_mame, tmp)) {
+		memset(dst->lines, 0, sizeof dst->lines);
+		dst->fb_w = dst->fb_h = 0;
+		return;
+	}
+	memcpy(dst->lines, tmp->lines, sizeof dst->lines);
+	dst->vis_left = tmp->vis_left;
+	dst->vis_top = tmp->vis_top;
+	dst->total_lines = tmp->total_lines;
+	dst->vpos = tmp->vpos;
+	dst->hpos = tmp->hpos;
+	dst->ctrl = tmp->ctrl;
+	dst->frame = tmp->frame;
+	if(!xrgb) {
+		std::lock_guard<std::mutex> lock(_frameLock);
+		width = (int)_frameWidth;
+		height = (int)_frameHeight;
+		if(_frameSerial != 0 && width > 0 && height > 0 && (size_t)width * height <= (size_t)A7800VID_FB_MAXW * A7800VID_FB_MAXH) {
+			memcpy(dst->fb, _frame.data(), (size_t)width * height * sizeof(uint32_t));
+		} else {
+			width = height = 0;
+		}
+	} else if(width <= 0 || height <= 0 || (size_t)width * height > (size_t)A7800VID_FB_MAXW * A7800VID_FB_MAXH) {
+		width = height = 0;
+	} else {
+		memcpy(dst->fb, xrgb, (size_t)width * height * sizeof(uint32_t));
+	}
+	dst->fb_w = width;
+	dst->fb_h = height;
+	int beam = tmp->vpos - tmp->vis_top;
+	dst->beam_row = std::max(0, std::min(beam, height));
+}
+
+void MameHost::CaptureEnable(bool on)
+{
+	if(on) {
+		{
+			std::lock_guard<std::mutex> lock(_capLock);
+			if(!_cap) {
+				_cap.reset(new a7800vid_capture());
+			}
+		}
+		_capUsers++;
+	} else if(_capUsers.load() > 0) {
+		_capUsers--;
+	}
+}
+
+bool MameHost::CaptureGet(a7800vid_capture* dst, uint64_t* serial)
+{
+	std::lock_guard<std::mutex> lock(_capLock);
+	if(!_cap || _cap->serial == 0 || (serial && *serial == _cap->serial)) {
+		return false;
+	}
+	memcpy(dst, _cap.get(), sizeof *dst);
+	if(serial) {
+		*serial = _cap->serial;
+	}
+	return true;
+}
+
+bool MameHost::CaptureFill(a7800vid_capture* dst)
+{
+	uint64_t serial = 0;
+	bool ok = false;
+	const bool ran = WithMame([&](fngo_mame*) {
+		FillCapture(dst, nullptr, 0, 0);
+		ok = dst->fb_w > 0 || dst->total_lines > 0;
+	});
+	if(ran) {
+		std::lock_guard<std::mutex> lock(_frameLock);
+		serial = _frameSerial;
+	}
+	dst->serial = dst->fb_w > 0 ? std::max<uint64_t>(serial, 1) : 0;
+	return ran && ok;
 }
 
 void MameHost::SetFrameCallback(FrameCallback cb, void* ctx)

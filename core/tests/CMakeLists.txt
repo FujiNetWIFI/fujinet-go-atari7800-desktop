@@ -62,6 +62,22 @@ target_link_libraries(help_test PRIVATE a7800_session)
 a7800_link_mame(help_test)
 add_test(NAME help COMMAND help_test)
 
+# The Video tab's controller, fed synthetic MARIA captures: no machine.
+add_executable(vidtab_test vidtab_test.c)
+target_link_libraries(vidtab_test PRIVATE a7800_session)
+target_include_directories(vidtab_test PRIVATE "${CMAKE_SOURCE_DIR}/core/src")
+a7800_link_mame(vidtab_test)
+add_test(NAME vidtab COMMAND vidtab_test)
+
+# The Video tab against the real machine: Display at a stop is the machine's
+# frame, the Beam view (redrawn from MARIA's line RAM) equals it at a vblank,
+# the inspector and its watchpoints.
+add_executable(vidtab_live_test vidtab_live_test.c)
+target_link_libraries(vidtab_live_test PRIVATE a7800_session)
+a7800_link_mame(vidtab_live_test)
+add_test(NAME vidtab_live COMMAND vidtab_live_test)
+set_tests_properties(vidtab_live PROPERTIES TIMEOUT 120)
+
 # The external-FujiNet address field, pure.
 add_executable(hostport_test hostport_test.c)
 target_link_libraries(hostport_test PRIVATE a7800_session)
@@ -131,3 +147,13 @@ target_include_directories(fujitrace_test PRIVATE
 find_package(Threads REQUIRED)
 target_link_libraries(fujitrace_test PRIVATE Threads::Threads)
 add_test(NAME fujitrace COMMAND fujitrace_test)
+
+# Watches, range and search parsing, breakpoint descriptions, region names
+# and the trace ring's format and filters, pure (the debugger calls they make
+# are stubbed in the test).
+add_executable(memtools_test memtools_test.c
+  "${CMAKE_SOURCE_DIR}/core/src/memtools.c" "${CMAKE_SOURCE_DIR}/core/src/m6502dasm.c")
+target_include_directories(memtools_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/core/src" "${CMAKE_SOURCE_DIR}/core/include")
+target_link_libraries(memtools_test PRIVATE Threads::Threads)
+add_test(NAME memtools COMMAND memtools_test)

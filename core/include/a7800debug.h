@@ -39,10 +39,14 @@ int  a7800debug_is_attached(a7800debug *d);
 int  a7800debug_is_stopped(a7800debug *d);
 void a7800debug_stop(a7800debug *d);         /* break at the next instruction */
 void a7800debug_resume(a7800debug *d);       /* "run" */
-/* Why the machine last stopped ("stopped", "breakpoint 1 at $C123",
- * "watchpoint 2: write $2000", "step", ...) and the PC, -1 if none.
- * Returns length. */
+/* Why the machine last stopped ("breakpoint 1 at $C123", "step at $C01A",
+ * "watchpoint 1001: wrote $0080 = $41 (was $40)", "stopped at $C00B") and the
+ * PC. A stop text without a "$" gets " at $xxxx". While the machine runs:
+ * "running" and -1. Returns length. */
 int  a7800debug_stop_reason(a7800debug *d, char *dst, int dstsz, int *address);
+/* Bumped on every stop, so a window can recentre its views on a new one
+ * (a command or a frame refresh does not move it). */
+uint64_t a7800debug_stop_serial(a7800debug *d);
 /* Bumped whenever a command ran or the machine stopped/resumed, so a window
  * knows when to refresh. */
 unsigned a7800debug_generation(a7800debug *d);
@@ -52,7 +56,9 @@ unsigned a7800debug_generation(a7800debug *d);
  * go [addr], gvblank, bpset <addr>[,cond], wpset <addr>,<len>,<r|w|rw>,
  * print <expr>, dump, find, trace ...) and a few of the family's own:
  * "cart" (the FujiNet cartridge), "maria" (its registers and display
- * list), "labels <file>" (load symbols). Output text into dst; returns its
+ * list), "labels <file>" (load symbols), "watch [range]", "unwatch
+ * [n|all]" (the watch list of a7800memtools.h) and "find [hex] <bytes>" /
+ * "find text <string>" (memory search; MAME's own comma form still works). Output text into dst; returns its
  * length. Commands that would restore or replay the machine's past (state
  * save and load, hardreset, exit) are refused: they would replay mailbox
  * transactions fujinet-pc has already acted on. */
@@ -132,12 +138,17 @@ void a7800debug_io_get(a7800debug *d, a7800debug_io *out);
 int  a7800debug_read(a7800debug *d, uint16_t addr, uint8_t *dst, int n);
 /* A debugger edit (RAM takes it). */
 void a7800debug_write(a7800debug *d, uint16_t addr, uint8_t value);
+/* MAME's expression evaluator (registers, labels, $hex, [addr] ...): 0 and
+ * *out (the 32-bit result), or -1 with a message in err. */
+int  a7800debug_eval(a7800debug *d, const char *expression, long *out,
+                     char *err, int errsz);
 
 /* ---- disassembly --------------------------------------------------------------- */
 typedef struct {
     uint16_t address;
     int is_pc;
-    int has_breakpoint;
+    int has_breakpoint;     /* an enabled execute breakpoint covers it */
+    int bp_disabled;        /* only a disabled one does (the grey dot) */
     int is_code;            /* always 1: the 6502 has no code/data map here */
     char bytes[16];
     char label[48];
@@ -155,6 +166,21 @@ int  a7800debug_row_address(a7800debug *d, uint16_t addr, int rows);
 int  a7800debug_label_address(a7800debug *d, const char *label);
 int  a7800debug_address_label(a7800debug *d, uint16_t addr, char *dst, int dstsz);
 int  a7800debug_set_label(a7800debug *d, uint16_t addr, const char *label);
+
+/* ---- symbols (loaded and set labels, for a Symbols tab) ---------------------- */
+int  a7800debug_symbols_count(a7800debug *d);
+/* Entry `index` (0 .. count-1): address and name. Returns 1, or 0 past the
+ * end. The order is the table's; it changes when symbols are loaded or
+ * cleared. */
+int  a7800debug_symbols_get(a7800debug *d, int index, uint16_t *addr, char *name, int namesz);
+/* Indices of the entries whose name contains `text` (case-insensitive; empty
+ * matches all), ordered by address then name. Returns the count written. */
+int  a7800debug_symbols_filter(a7800debug *d, const char *text, int *out, int max);
+/* Drop every loaded symbol and label. MAME's expression evaluator has no way
+ * to forget a symbol, so a name already fed to it still evaluates in the
+ * console until the next hard reset; the Symbols tab and the disassembly
+ * forget it at once. */
+void a7800debug_clear_symbols(a7800debug *d);
 /* Load a symbol file: ld65 -Ln / VICE ("al C:1234 .name"), a ca65 .dbg, or
  * "name = $1234" lines. With path NULL, <cart>.lbl/.dbg/.sym next to the
  * opened cartridge. Message into msg; returns labels loaded or -1. */
@@ -204,12 +230,17 @@ void a7800debug_fujinet_trace_clear(a7800debug *d);
 int  a7800debug_fujinet_state(a7800debug *d, char *dst, int dstsz);
 
 /* ---- breakpoints and watchpoints ------------------------------------------------ */
-typedef enum { A7800DEBUG_BP_EXEC = 1, A7800DEBUG_BP_READ = 2, A7800DEBUG_BP_WRITE = 4 } a7800debug_bp_type;
+typedef enum {
+    A7800DEBUG_BP_EXEC = 1, A7800DEBUG_BP_READ = 2, A7800DEBUG_BP_WRITE = 4,
+    /* Read and write as one entry (wpset ...,rw): READ | WRITE */
+    A7800DEBUG_BP_ACCESS = 6
+} a7800debug_bp_type;
 typedef struct {
     int id;                /* breakpoints 1.., watchpoints 1001.. */
     int type;              /* a7800debug_bp_type bits */
     uint16_t start, end;
     int enabled;
+    unsigned hits;         /* stops it caused (counted here: MAME keeps none) */
     char condition[128];
 } a7800debug_breakpoint;
 /* Execute breakpoint at addr: added if absent, removed if present. Returns
@@ -224,6 +255,62 @@ void a7800debug_breakpoint_remove(a7800debug *d, int id);
 void a7800debug_breakpoint_enable(a7800debug *d, int id, int enabled);
 int  a7800debug_breakpoint_list(a7800debug *d, a7800debug_breakpoint *out, int max);
 void a7800debug_breakpoint_clear(a7800debug *d);
+/* Zero every hit count. */
+void a7800debug_breakpoint_clear_hits(a7800debug *d);
+
+/* ---- the trace ring ------------------------------------------------------------ */
+typedef struct {
+    uint16_t pc;
+    uint8_t a, x, y, p, sp;
+    uint8_t bytes[3];        /* the instruction's first bytes */
+    uint64_t cycles;
+    int16_t scanline, dot;
+} a7800debug_trace;
+/* The ring keeps the newest 65536 (MAME's fork holds it; allocated on the
+ * first enable). */
+void a7800debug_trace_enable(a7800debug *d, int on);
+int  a7800debug_trace_enabled(a7800debug *d);
+/* Newest first; returns entries copied. */
+int  a7800debug_trace_read(a7800debug *d, a7800debug_trace *out, int max);
+void a7800debug_trace_clear(a7800debug *d);
+/* Entries held. */
+int  a7800debug_trace_count(a7800debug *d);
+/* Pure (no machine; a7800memtools.c): "C00B  JSR $C020  A=00 X=01 Y=00 P=34 SP=FF". */
+int  a7800debug_trace_format(const a7800debug_trace *t, char *dst, int dstsz);
+enum { A7800DEBUG_TRACE_ALL = 0, A7800DEBUG_TRACE_BRANCHES, A7800DEBUG_TRACE_RANGE };
+/* 1 if the entry passes the filter (BRANCHES: jumps, calls, returns and
+ * conditional branches; RANGE: pc in lo..hi, either way round). Pure. */
+int  a7800debug_trace_match(const a7800debug_trace *t, int filter, uint16_t lo, uint16_t hi);
+
+/* ---- memory search and the memory map ----------------------------------------- */
+#define A7800DEBUG_SEARCH_NOCASE 1
+/* Stopped only (-1 while running). Finds up to max start addresses in
+ * from..to of the 6502's 64K as mapped now, where (mem & mask) == (pat & mask)
+ * for all n bytes (`to` bounds the start, not the end). Returns the count. */
+int  a7800debug_search(a7800debug *d, const uint8_t *pat, int n, uint8_t mask,
+                       int flags, uint16_t from, uint16_t to, uint16_t *out, int max);
+/* The next match after `from` (before it if backward), wrapping once.
+ * Returns 1 and *found, 0 for none, -1 while running. */
+int  a7800debug_search_next(a7800debug *d, const uint8_t *pat, int n, uint8_t mask,
+                            int flags, uint16_t from, int backward, uint16_t *found);
+
+typedef struct {
+    uint16_t lo, hi;
+    int readable, writable;
+    char name[48];
+} a7800debug_region;
+/* Ordered, non-overlapping regions covering $0000-$FFFF as the 7800 maps it:
+ * TIA, MARIA, RAM, RIOT I/O and RAM, their mirrors, the cartridge, and the
+ * cartridge's POKEY window when it has one. Returns the count (up to max). */
+int  a7800debug_memory_map(a7800debug *d, a7800debug_region *out, int max);
+
+/* ---- sound ---------------------------------------------------------------------- */
+typedef struct {
+    uint8_t tia_audc[2], tia_audf[2], tia_audv[2];
+    int pokey_present;
+    uint8_t pokey_audf[4], pokey_audc[4], pokey_audctl;
+} a7800debug_sound;
+void a7800debug_sound_get(a7800debug *d, a7800debug_sound *out);
 
 /* ---- files -------------------------------------------------------------------- */
 /* Save with the path a native file picker supplied. kind: "dis" (the

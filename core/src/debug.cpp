@@ -16,6 +16,8 @@
  */
 
 #include <algorithm>
+#include <atomic>
+#include <map>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -29,6 +31,8 @@
 
 extern "C" {
 #include "a7800debug.h"
+#include "a7800vidtab.h"
+#include "a7800memtools.h"
 #include "fujitrace.h"
 #include "session_internal.h"
 }
@@ -55,6 +59,9 @@ struct a7800debug
 	bool attached = false;
 	std::string stop_reason;
 	int stop_address = -1;
+	std::atomic<uint64_t> stop_serial { 0 };
+	bool step_pending = false;     // a step was issued: the next stop is its
+	std::map<int, unsigned> hits;  // by breakpoint id (watchpoints 1001..)
 	std::vector<Label> labels;
 	uint32_t console_seq = 0;      // the console's lines already handed out
 	uint32_t palette[256] = {};
@@ -98,6 +105,16 @@ void bump(a7800debug* d)
 	d->generation++;
 }
 
+// The console lines after *seq. The last line of MAME's console is the one
+// still open: a message printed next lands in it, so it stays unread (the
+// reader hands it out empty and would move past it).
+void read_console(fngo_mame* m, uint32_t* seq, std::vector<char>& text)
+{
+	const int n = fngo_mame_console_text(m, seq, text.data(), (int)text.size());
+	if(n >= 1 && text[(size_t)n - 1] == '\n' && (n == 1 || text[(size_t)n - 2] == '\n') && *seq > 0)
+		--*seq;
+}
+
 } // namespace
 
 // ---- lifecycle --------------------------------------------------------------
@@ -130,8 +147,9 @@ void a7800debug_fujinet_tap(void* user, int dir, const uint8_t* raw, size_t len)
 
 // The emulation thread: the debugger has just stopped the machine. MAME
 // says why in its console ("Stopped at breakpoint 1", "Stopped at
-// watchpoint 2 writing ..."); peek at it without taking the lines from the
-// prompt.
+// watchpoint 2 writing ..."); read what it printed since the last stop
+// without taking the lines from the prompt (the prompt drains before each
+// command).
 void a7800debug_note_stop(a7800session* s)
 {
 	a7800debug* d = static_cast<a7800debug*>(s->debugger);
@@ -145,26 +163,55 @@ void a7800debug_note_stop(a7800session* s)
 	fngo_mame_cpu_get(m, &cpu);
 
 	uint32_t seq;
+	bool step;
 	{
 		std::lock_guard<std::mutex> lock(d->mutex);
 		seq = d->console_seq;
+		step = d->step_pending;
+		d->step_pending = false;
 	}
 	std::vector<char> text(8192);
-	fngo_mame_console_text(m, &seq, text.data(), (int)text.size());
-	std::string reason = "stopped";
+	read_console(m, &seq, text);
+	std::string reason = step ? "step" : "stopped";
+	int hit_id = -1;
 	std::istringstream lines(text.data());
 	std::string line;
 	while(std::getline(lines, line)) {
-		if(line.rfind("Stopped at", 0) == 0) {
-			reason = line.substr(11);
-			if(!reason.empty()) reason[0] = (char)tolower((unsigned char)reason[0]);
+		if(line.rfind("Stopped at", 0) != 0) continue;
+		reason = line.substr(11);
+		if(!reason.empty()) reason[0] = (char)tolower((unsigned char)reason[0]);
+		hit_id = -1;
+		unsigned index = 0;
+		if(sscanf(reason.c_str(), "breakpoint %x", &index) == 1) {
+			hit_id = (int)index;
+		} else if(sscanf(reason.c_str(), "watchpoint %x", &index) == 1) {
+			hit_id = WatchpointBase + (int)index;
+			uint32_t address = 0, value = 0, old = 0;
+			fngo_mame_watch_last(m, &address, &value, &old);
+			char buf[96];
+			if(reason.find("reading") != std::string::npos)
+				snprintf(buf, sizeof buf, "watchpoint %d: read $%04X = $%02X", hit_id, address & 0xFFFF, value & 0xFF);
+			else
+				snprintf(buf, sizeof buf, "watchpoint %d: wrote $%04X = $%02X (was $%02X)", hit_id, address & 0xFFFF,
+				         value & 0xFF, old & 0xFF);
+			reason = buf;
+		} else if(reason.rfind("temporary breakpoint", 0) == 0) {
+			reason = step ? "step" : "run to";
 		}
+	}
+	if(reason.find('$') == std::string::npos) {
+		char at[16];
+		snprintf(at, sizeof at, " at $%04X", cpu.pc & 0xFFFF);
+		reason += at;
 	}
 
 	std::lock_guard<std::mutex> lock(d->mutex);
+	d->console_seq = seq;
+	if(hit_id >= 0) d->hits[hit_id]++;
 	d->stop_reason = reason;
 	d->stop_address = (int)cpu.pc;
 	d->generation++;
+	d->stop_serial++;
 }
 
 extern "C" void a7800debug_attach(a7800debug* d)
@@ -206,9 +253,19 @@ extern "C" void a7800debug_resume(a7800debug* d)
 extern "C" int a7800debug_stop_reason(a7800debug* d, char* dst, int dstsz, int* address)
 {
 	if(!d) return 0;
+	const bool running = d->session->running && !host(d)->DebugStopped();
 	std::lock_guard<std::mutex> lock(d->mutex);
+	if(running) {
+		if(address) *address = -1;
+		return put(dst, dstsz, "running");
+	}
 	if(address) *address = d->stop_address;
 	return put(dst, dstsz, d->stop_reason);
+}
+
+extern "C" uint64_t a7800debug_stop_serial(a7800debug* d)
+{
+	return d ? d->stop_serial.load() : 0;
 }
 
 extern "C" unsigned a7800debug_generation(a7800debug* d)
@@ -223,10 +280,15 @@ extern "C" unsigned a7800debug_generation(a7800debug* d)
 namespace {
 void step(a7800debug* d, int kind)
 {
-	with_mame(d, [kind](fngo_mame* m) { fngo_mame_debug_step(m, kind); });
-	std::lock_guard<std::mutex> lock(d->mutex);
-	d->stop_reason = "step";
-	d->generation++;
+	{
+		std::lock_guard<std::mutex> lock(d->mutex);
+		d->step_pending = true;
+	}
+	if(!with_mame(d, [kind](fngo_mame* m) { fngo_mame_debug_step(m, kind); })) {
+		std::lock_guard<std::mutex> lock(d->mutex);
+		d->step_pending = false;
+	}
+	bump(d);
 }
 }
 
@@ -631,8 +693,12 @@ extern "C" int a7800debug_disassemble(a7800debug* d, uint16_t addr, a7800debug_l
 			l.address = (uint16_t)a;
 			l.is_pc = a == (c.pc & 0xFFFF);
 			l.is_code = 1;
-			for(const fngo_mame_bp& bp : bps)
-				if(bp.address == a) l.has_breakpoint = 1;
+			for(const fngo_mame_bp& bp : bps) {
+				if(bp.address != a) continue;
+				if(bp.enabled) l.has_breakpoint = 1;
+				else l.bp_disabled = 1;
+			}
+			if(l.has_breakpoint) l.bp_disabled = 0;
 			int off = 0;
 			for(int i = 0; i < len && i < 4; i++)
 				off += snprintf(l.bytes + off, sizeof l.bytes - (size_t)off, i ? " %02X" : "%02X", bytes[i]);
@@ -818,6 +884,10 @@ extern "C" int a7800debug_breakpoint_add(a7800debug* d, int type, uint16_t start
 		const int index = fngo_mame_wp_set(m, wp, start, length, condition);
 		id = index >= 0 ? WatchpointBase + index : -1;
 	});
+	if(id >= 0) {
+		std::lock_guard<std::mutex> lock(d->mutex);
+		d->hits.erase(id);       // MAME reuses indices
+	}
 	bump(d);
 	return id;
 }
@@ -828,6 +898,20 @@ extern "C" void a7800debug_breakpoint_remove(a7800debug* d, int id)
 		if(id >= WatchpointBase) fngo_mame_wp_clear(m, id - WatchpointBase);
 		else fngo_mame_bp_clear(m, id);
 	});
+	{
+		std::lock_guard<std::mutex> lock(d->mutex);
+		d->hits.erase(id);
+	}
+	bump(d);
+}
+
+extern "C" void a7800debug_breakpoint_clear_hits(a7800debug* d)
+{
+	if(!d) return;
+	{
+		std::lock_guard<std::mutex> lock(d->mutex);
+		d->hits.clear();
+	}
 	bump(d);
 }
 
@@ -843,8 +927,10 @@ extern "C" void a7800debug_breakpoint_enable(a7800debug* d, int id, int enabled)
 extern "C" int a7800debug_breakpoint_list(a7800debug* d, a7800debug_breakpoint* out, int max)
 {
 	int n = 0;
-	with_mame(d, [&](fngo_mame* m) {
+	std::vector<int> live;
+	const bool ran = with_mame(d, [&](fngo_mame* m) {
 		for(const fngo_mame_bp& bp : breakpoints(m)) {
+			live.push_back(bp.index);
 			if(out && n < max) {
 				a7800debug_breakpoint& b = out[n];
 				memset(&b, 0, sizeof b);
@@ -859,6 +945,7 @@ extern "C" int a7800debug_breakpoint_list(a7800debug* d, a7800debug_breakpoint* 
 		std::vector<fngo_mame_wp> wps(64);
 		const int nw = std::min(fngo_mame_wp_list(m, wps.data(), (int)wps.size()), 64);
 		for(int i = 0; i < nw; i++) {
+			live.push_back(WatchpointBase + wps[i].index);
 			if(out && n < max) {
 				a7800debug_breakpoint& b = out[n];
 				memset(&b, 0, sizeof b);
@@ -873,11 +960,24 @@ extern "C" int a7800debug_breakpoint_list(a7800debug* d, a7800debug_breakpoint* 
 			n++;
 		}
 	});
+	// hits are counted by id: forget those of points since removed
+	std::lock_guard<std::mutex> lock(d->mutex);
+	for(auto it = d->hits.begin(); ran && it != d->hits.end();) {
+		it = std::find(live.begin(), live.end(), it->first) == live.end() ? d->hits.erase(it) : std::next(it);
+	}
+	for(int i = 0; out && i < n && i < max; i++) {
+		const auto it = d->hits.find(out[i].id);
+		out[i].hits = it == d->hits.end() ? 0 : it->second;
+	}
 	return n;
 }
 
 extern "C" void a7800debug_breakpoint_clear(a7800debug* d)
 {
+	{
+		std::lock_guard<std::mutex> lock(d->mutex);
+		d->hits.clear();
+	}
 	with_mame(d, [](fngo_mame* m) {
 		for(const fngo_mame_bp& bp : breakpoints(m))
 			fngo_mame_bp_clear(m, bp.index);
@@ -887,6 +987,317 @@ extern "C" void a7800debug_breakpoint_clear(a7800debug* d)
 			fngo_mame_wp_clear(m, wps[i].index);
 	});
 	bump(d);
+}
+
+// ---- expressions ------------------------------------------------------------------------
+
+// MAME's evaluator, through its printf: the value in hex on the console.
+extern "C" int a7800debug_eval(a7800debug* d, const char* expression, long* out, char* err, int errsz)
+{
+	if(!d || !expression || !out || strchr(expression, '"') || !*expression) {
+		put(err, errsz, "not an expression");
+		return -1;
+	}
+	bool ok = false;
+	std::string message = "the machine is not running";
+	with_mame(d, [&](fngo_mame* m) {
+		uint32_t seq;
+		{
+			std::lock_guard<std::mutex> lock(d->mutex);
+			seq = d->console_seq;
+		}
+		std::vector<char> text(4096);
+		read_console(m, &seq, text);      // what came before
+		const std::string command = std::string("printf \"%X\",(") + expression + ")";
+		const int rc = fngo_mame_debug_command(m, command.c_str());
+		read_console(m, &seq, text);
+		std::istringstream lines(text.data());
+		std::string line, last;
+		while(std::getline(lines, line))
+			if(!line.empty() && line[0] != '>') last = line;
+		const bool hex = !last.empty() && last.find_first_not_of("0123456789ABCDEFabcdef") == std::string::npos;
+		if(rc == 0 && hex) {
+			*out = (long)strtoul(last.c_str(), nullptr, 16);
+			ok = true;
+		} else {
+			message = last.empty() ? "bad expression" : last;
+		}
+	});
+	if(!ok) put(err, errsz, message);
+	return ok ? 0 : -1;
+}
+
+// ---- symbols ------------------------------------------------------------------------------
+
+namespace {
+
+bool contains_nocase(const std::string& hay, const std::string& needle)
+{
+	return std::search(hay.begin(), hay.end(), needle.begin(), needle.end(),
+	                   [](char a, char b) { return tolower((unsigned char)a) == tolower((unsigned char)b); })
+	       != hay.end();
+}
+
+} // namespace
+
+extern "C" int a7800debug_symbols_count(a7800debug* d)
+{
+	if(!d) return 0;
+	std::lock_guard<std::mutex> lock(d->mutex);
+	return (int)d->labels.size();
+}
+
+extern "C" int a7800debug_symbols_get(a7800debug* d, int index, uint16_t* addr, char* name, int namesz)
+{
+	if(!d) return 0;
+	std::lock_guard<std::mutex> lock(d->mutex);
+	if(index < 0 || index >= (int)d->labels.size()) return 0;
+	const Label& l = d->labels[(size_t)index];
+	if(addr) *addr = l.address;
+	if(name && namesz > 0) snprintf(name, (size_t)namesz, "%s", l.name.c_str());
+	return 1;
+}
+
+extern "C" int a7800debug_symbols_filter(a7800debug* d, const char* text, int* out, int max)
+{
+	if(!d || !out || max <= 0) return 0;
+	std::lock_guard<std::mutex> lock(d->mutex);
+	std::vector<int> pick;
+	for(size_t i = 0; i < d->labels.size(); i++)
+		if(contains_nocase(d->labels[i].name, text ? text : "")) pick.push_back((int)i);
+	std::stable_sort(pick.begin(), pick.end(), [d](int a, int b) {
+		const Label& la = d->labels[(size_t)a];
+		const Label& lb = d->labels[(size_t)b];
+		if(la.address != lb.address) return la.address < lb.address;
+		return std::lexicographical_compare(la.name.begin(), la.name.end(), lb.name.begin(), lb.name.end(),
+		                                    [](char x, char y) { return tolower((unsigned char)x) < tolower((unsigned char)y); });
+	});
+	const int n = std::min<int>((int)pick.size(), max);
+	for(int i = 0; i < n; i++) out[i] = pick[(size_t)i];
+	return n;
+}
+
+extern "C" void a7800debug_clear_symbols(a7800debug* d)
+{
+	if(!d) return;
+	{
+		std::lock_guard<std::mutex> lock(d->mutex);
+		d->labels.clear();
+	}
+	bump(d);
+}
+
+// ---- the trace ring ----------------------------------------------------------------------
+
+extern "C" void a7800debug_trace_enable(a7800debug* d, int on)
+{
+	with_mame(d, [on](fngo_mame* m) { fngo_mame_trace_enable(m, on); });
+	bump(d);
+}
+
+extern "C" int a7800debug_trace_enabled(a7800debug* d)
+{
+	int on = 0;
+	with_mame(d, [&](fngo_mame* m) { on = fngo_mame_trace_enabled(m); });
+	return on;
+}
+
+extern "C" int a7800debug_trace_read(a7800debug* d, a7800debug_trace* out, int max)
+{
+	int n = 0;
+	if(!out || max <= 0) return 0;
+	with_mame(d, [&](fngo_mame* m) {
+		std::vector<fngo_mame_trace_entry> ring((size_t)max);
+		const int got = fngo_mame_trace_read(m, 0, ring.data(), max);
+		for(; n < got; n++) {
+			const fngo_mame_trace_entry& e = ring[(size_t)n];
+			a7800debug_trace& t = out[n];
+			t.pc = e.pc;
+			t.a = e.a; t.x = e.x; t.y = e.y; t.p = e.p; t.sp = e.sp;
+			memcpy(t.bytes, e.bytes, sizeof t.bytes);
+			t.cycles = e.cycles;
+			t.scanline = (int16_t)e.scanline;
+			t.dot = (int16_t)e.dot;
+		}
+	});
+	return n;
+}
+
+extern "C" void a7800debug_trace_clear(a7800debug* d)
+{
+	with_mame(d, [](fngo_mame* m) { fngo_mame_trace_clear(m); });
+	bump(d);
+}
+
+extern "C" int a7800debug_trace_count(a7800debug* d)
+{
+	int n = 0;
+	with_mame(d, [&](fngo_mame* m) { n = fngo_mame_trace_count(m); });
+	return n;
+}
+
+// ---- memory search -------------------------------------------------------------------------
+
+namespace {
+
+bool match_at(const std::vector<uint8_t>& mem, unsigned address, const uint8_t* pat, int n, uint8_t mask, int flags)
+{
+	for(int i = 0; i < n; i++) {
+		uint8_t b = mem[address + (unsigned)i];
+		uint8_t p = pat[i];
+		if(flags & A7800DEBUG_SEARCH_NOCASE) {
+			if(b >= 'a' && b <= 'z') b = (uint8_t)(b - 32);
+			if(p >= 'a' && p <= 'z') p = (uint8_t)(p - 32);
+		}
+		if((b & mask) != (p & mask)) return false;
+	}
+	return true;
+}
+
+// The 64K as the 6502 sees it now, side-effect free; false unless stopped.
+bool snapshot(a7800debug* d, std::vector<uint8_t>& mem)
+{
+	if(!a7800debug_is_stopped(d)) return false;
+	mem.assign(0x10000, 0);
+	return a7800debug_read(d, 0, mem.data(), 0x10000) > 0;
+}
+
+int search_buffer(const std::vector<uint8_t>& mem, const uint8_t* pat, int n, uint8_t mask, int flags,
+                  unsigned from, unsigned to, uint16_t* out, int max)
+{
+	int found = 0;
+	for(unsigned a = from; a <= to && a + (unsigned)n - 1 <= 0xFFFF && found < max; a++)
+		if(match_at(mem, a, pat, n, mask, flags)) out[found++] = (uint16_t)a;
+	return found;
+}
+
+} // namespace
+
+extern "C" int a7800debug_search(a7800debug* d, const uint8_t* pat, int n, uint8_t mask, int flags,
+                                 uint16_t from, uint16_t to, uint16_t* out, int max)
+{
+	std::vector<uint8_t> mem;
+	if(!d || !pat || n <= 0 || !out || max <= 0 || !snapshot(d, mem)) return -1;
+	if(from > to) std::swap(from, to);
+	return search_buffer(mem, pat, n, mask, flags, from, to, out, max);
+}
+
+extern "C" int a7800debug_search_next(a7800debug* d, const uint8_t* pat, int n, uint8_t mask, int flags,
+                                      uint16_t from, int backward, uint16_t* found)
+{
+	std::vector<uint8_t> mem;
+	uint16_t hit = 0;
+	int result = 0;
+	if(!d || !pat || n <= 0 || !found || !snapshot(d, mem)) return -1;
+	if(!backward) {
+		// after `from` to the end, then 0..from
+		if(from < 0xFFFF && search_buffer(mem, pat, n, mask, flags, (unsigned)from + 1, 0xFFFF, &hit, 1))
+			result = 1;
+		else if(search_buffer(mem, pat, n, mask, flags, 0, from, &hit, 1))
+			result = 1;
+	} else {
+		// the nearest match before `from`, else the last one from `from` up
+		for(int pass = 0; pass < 2 && !result; pass++) {
+			const int start = pass == 0 ? (int)from - 1 : 0xFFFF;
+			const int stop = pass == 0 ? 0 : (int)from;
+			for(int a = start; a >= stop; a--)
+				if((unsigned)a + (unsigned)n - 1 <= 0xFFFF && match_at(mem, (unsigned)a, pat, n, mask, flags)) {
+					hit = (uint16_t)a;
+					result = 1;
+					break;
+				}
+		}
+	}
+	if(result) *found = hit;
+	return result;
+}
+
+// ---- the memory map --------------------------------------------------------------------------
+
+// a7800.cpp's a7800_mem: ram() at $0000-$01FF mirrored at $2000, TIA and MARIA
+// over its first $40 bytes (mirror $300), the RIOT's I/O ($0280, mirror
+// $160) and RAM ($0480, mirror $100), the console's own RAM at $1800 and
+// $2200, the slot from $4000. The unlisted gaps read open bus.
+extern "C" int a7800debug_memory_map(a7800debug* d, a7800debug_region* out, int max)
+{
+	int n = 0;
+	if(!d || !out || max <= 0) return 0;
+	a7800debug_io io;
+	a7800debug_io_get(d, &io);
+	fngo_mame_cart_status cart;
+	const bool have_cart = fngo_mame_fujinet_status(&cart) != 0;
+	const bool supergame = have_cart && strstr(cart.live_kind, "sg") != nullptr;
+
+	struct Row { uint16_t lo, hi; int readable, writable; const char* name; };
+	static const Row base[] = {
+		{ 0x0000, 0x001F, 1, 1, "TIA" },
+		{ 0x0020, 0x003F, 1, 1, "MARIA" },
+		{ 0x0040, 0x00FF, 1, 1, "RAM (zero page)" },
+		{ 0x0100, 0x011F, 1, 1, "TIA (mirror)" },
+		{ 0x0120, 0x013F, 1, 1, "MARIA (mirror)" },
+		{ 0x0140, 0x01FF, 1, 1, "RAM (stack page)" },
+		{ 0x0200, 0x021F, 1, 1, "TIA (mirror)" },
+		{ 0x0220, 0x023F, 1, 1, "MARIA (mirror)" },
+		{ 0x0240, 0x027F, 0, 0, "Open bus" },
+		{ 0x0280, 0x02FF, 1, 1, "RIOT I/O" },
+		{ 0x0300, 0x031F, 1, 1, "TIA (mirror)" },
+		{ 0x0320, 0x033F, 1, 1, "MARIA (mirror)" },
+		{ 0x0340, 0x037F, 0, 0, "Open bus" },
+		{ 0x0380, 0x03FF, 1, 1, "RIOT I/O (mirror)" },
+		{ 0x0400, 0x047F, 0, 0, "Open bus" },
+		{ 0x0480, 0x04FF, 1, 1, "RIOT RAM (128 bytes)" },
+		{ 0x0500, 0x057F, 0, 0, "Open bus" },
+		{ 0x0580, 0x05FF, 1, 1, "RIOT RAM (mirror)" },
+		{ 0x0600, 0x17FF, 0, 0, "Open bus" },
+		{ 0x1800, 0x1FFF, 1, 1, "RAM (2K)" },
+		{ 0x2000, 0x21FF, 1, 1, "RAM (mirror of $0000-$01FF)" },
+		{ 0x2200, 0x27FF, 1, 1, "RAM" },
+		{ 0x2800, 0x3FFF, 0, 0, "Open bus" },
+	};
+	auto add = [&](uint16_t lo, uint16_t hi, int readable, int writable, const std::string& name) {
+		if(n >= max) return;
+		a7800debug_region& r = out[n++];
+		r.lo = lo;
+		r.hi = hi;
+		r.readable = readable;
+		r.writable = writable;
+		snprintf(r.name, sizeof r.name, "%s", name.c_str());
+	};
+	for(const Row& row : base) {
+		// POKEY on the cartridge, where its mapper puts it
+		if(io.pokey_present && supergame && row.lo == 0x0400) {
+			add(0x0400, 0x044F, 0, 0, row.name);
+			add(0x0450, 0x045F, 1, 1, "POKEY (cartridge)");
+			add(0x0460, 0x047F, 0, 0, row.name);
+			continue;
+		}
+		add(row.lo, row.hi, row.readable, row.writable, row.name);
+	}
+	const std::string slot = have_cart && cart.live_kind[0] ? std::string("Cartridge (") + cart.live_kind + ")" : "Cartridge";
+	if(io.pokey_present && !supergame) {
+		add(0x4000, 0x400F, 1, 1, "POKEY (cartridge)");
+		add(0x4010, 0xFFFF, 1, 0, slot);
+	} else {
+		add(0x4000, 0xFFFF, 1, 0, slot);
+	}
+	return n;
+}
+
+// ---- sound -----------------------------------------------------------------------------------
+
+extern "C" void a7800debug_sound_get(a7800debug* d, a7800debug_sound* out)
+{
+	if(!out) return;
+	a7800debug_io io;
+	a7800debug_io_get(d, &io);
+	memset(out, 0, sizeof *out);
+	memcpy(out->tia_audc, io.audc, sizeof out->tia_audc);
+	memcpy(out->tia_audf, io.audf, sizeof out->tia_audf);
+	memcpy(out->tia_audv, io.audv, sizeof out->tia_audv);
+	out->pokey_present = io.pokey_present;
+	memcpy(out->pokey_audf, io.pokey_audf, sizeof out->pokey_audf);
+	memcpy(out->pokey_audc, io.pokey_audc, sizeof out->pokey_audc);
+	out->pokey_audctl = io.pokey_audctl;
 }
 
 // ---- files -----------------------------------------------------------------------------
@@ -943,7 +1354,7 @@ namespace {
 const char* const Refused[] = { "ss", "sl", "statesave", "stateload", "rewind", "rw", "hardreset", "exit", "quit" };
 
 const char* const Commands[] = {
-	"help", "cart", "maria", "labels",
+	"help", "cart", "maria", "video", "labels", "watch", "unwatch",
 	"step", "s", "over", "o", "out", "go", "g", "gvblank", "gv", "gint", "gtime", "gt",
 	"next", "n", "focus", "bpset", "bp", "bpclear", "bpc", "bpdisable", "bpd",
 	"bpenable", "bpe", "bplist", "bpl", "wpset", "wp", "wpclear", "wpc", "wpdisable",
@@ -951,6 +1362,7 @@ const char* const Commands[] = {
 	"dump", "d", "find", "f", "fill", "dasm", "trace", "tracelog", "history", "comadd",
 	"comdelete", "comlist", "symlist", "cpulist", "softreset",
 	"a", "x", "y", "p", "sp", "pc", "curpc", "cycles", "frame", "beamx", "beamy",
+	"old", "value", "wpaddr", "wpdata",
 };
 
 std::string help_text()
@@ -960,6 +1372,12 @@ std::string help_text()
 		"  cart                the FujiNet cartridge's state\n"
 		"  maria               MARIA's registers and display list list\n"
 		"  labels <file>       load symbols (ld65 -Ln, ca65 .dbg, name = $1234)\n"
+		"  watch [range]       add to the watch list (an address, label, lo-hi), or list it\n"
+		"  unwatch <n|all>     drop a watch\n"
+		"  find [hex] <bytes>  search memory (stopped): find DB DC 32, find text <string>\n"
+		"                      (MAME's find with commas still works)\n"
+		"  wpset <addr>,<len>,<r|w|rw>[,cond]: a condition may use old (the byte a write\n"
+		"                      replaces) and value (the byte moving)\n"
 		"Everything else is MAME's debugger: \"help\" topics follow.\n";
 }
 
@@ -971,6 +1389,54 @@ std::string first_word(const std::string& s)
 	std::string w = s.substr(b, e == std::string::npos ? std::string::npos : e - b);
 	std::transform(w.begin(), w.end(), w.begin(), [](unsigned char c) { return (char)tolower(c); });
 	return w;
+}
+
+std::string rest_of(const std::string& s, const char* word)
+{
+	size_t at = s.find(word);
+	std::string rest = at == std::string::npos ? std::string() : s.substr(at + strlen(word));
+	rest.erase(0, rest.find_first_not_of(" \t"));
+	rest.erase(rest.find_last_not_of(" \t\r\n") + 1);
+	return rest;
+}
+
+// "find DB DC 32", "find hex ..", "find text ..": ours; MAME's own find
+// takes commas ("find 0,10000,aa,bb").
+std::string find_command(a7800debug* d, const std::string& cmd)
+{
+	std::string args = rest_of(cmd, "find");
+	int kind = A7800SEARCH_HEX;
+	if(args.rfind("text", 0) == 0 && (args.size() == 4 || isspace((unsigned char)args[4]))) {
+		kind = A7800SEARCH_TEXT;
+		args = rest_of(args, "text");
+	} else if(args.rfind("hex", 0) == 0 && (args.size() == 3 || isspace((unsigned char)args[3]))) {
+		args = rest_of(args, "hex");
+	}
+	uint8_t pat[A7800SEARCH_MAX], mask;
+	int n = 0, flags = 0;
+	if(args.empty() || !a7800search_parse(kind, args.c_str(), pat, &n, &mask, &flags))
+		return "find [hex] <bytes> | find text <string>\n";
+	uint16_t hit[32];
+	const int count = a7800debug_search(d, pat, n, mask, flags, 0, 0xFFFF, hit, 32);
+	if(count < 0) return "stop the machine first\n";
+	if(count == 0) return "not found\n";
+	std::string out;
+	for(int i = 0; i < count; i++) out += "$" + hex(hit[i], 4) + "\n";
+	return out;
+}
+
+std::string watch_list(a7800debug* d)
+{
+	if(!a7800watch_count()) return "no watches (watch <addr|label|lo-hi>)\n";
+	std::string out;
+	for(int i = 0; i < a7800watch_count(); i++) {
+		char text[160];
+		a7800watch_format(d, i, text, sizeof text);
+		char row[200];
+		snprintf(row, sizeof row, "%2d  %s\n", i, text);
+		out += row;
+	}
+	return out;
 }
 
 std::string maria_text(a7800debug* d)
@@ -1019,12 +1485,52 @@ extern "C" int a7800debug_command(a7800debug* d, const char* command, char* dst,
 	}
 	if(word == "maria")
 		return put(dst, dstsz, maria_text(d));
+	if(word == "video") {
+		// a short-lived Video tab: it asks for captures only while it exists
+		std::string arg = rest_of(cmd, "video");
+		arg.erase(0, arg.find_first_not_of(" \t"));
+		int section = A7800VID_S_REGISTERS;
+		if(!arg.empty()) {
+			section = -1;
+			for(int i = 0; i < A7800VID_S_COUNT; i++)
+				if(arg == a7800vid_section_key(i)) section = i;
+			if(section < 0)
+				return put(dst, dstsz, "video: pixel, registers, colours, lines or timing\n");
+		}
+		a7800vid_tab* tab = a7800vid_tab_new(d->session);
+		if(!tab) return put(dst, dstsz, "video: not available\n");
+		a7800vid_tab_refresh(tab, 1);
+		std::string text(16384, '\0');
+		int n = a7800vid_tab_text(tab, section, text.data(), (int)text.size());
+		a7800vid_tab_free(tab);
+		text.resize((size_t)std::max(0, std::min<int>(n, (int)text.size() - 1)));
+		return put(dst, dstsz, text.empty() ? std::string("video: no frame captured yet (stop the machine)\n") : text + "\n");
+	}
 	if(word == "labels") {
 		std::string file = cmd.substr(cmd.find("labels") + 6);
 		file.erase(0, file.find_first_not_of(" \t"));
 		char msg[256];
 		a7800debug_load_symbols(d, file.empty() ? nullptr : file.c_str(), msg, sizeof msg);
 		return put(dst, dstsz, std::string(msg) + "\n");
+	}
+
+	if(word == "watch") {
+		const std::string text = rest_of(cmd, "watch");
+		std::string out;
+		if(!text.empty() && a7800watch_add(text.c_str()) < 0) out = "no room for another watch\n";
+		return put(dst, dstsz, out + watch_list(d));
+	}
+	if(word == "unwatch") {
+		const std::string text = rest_of(cmd, "unwatch");
+		if(text == "all") a7800watch_clear();
+		else if(!text.empty()) a7800watch_remove((int)strtol(text.c_str(), nullptr, 0));
+		else return put(dst, dstsz, "unwatch <n|all>\n");
+		return put(dst, dstsz, watch_list(d));
+	}
+	if(word == "find") {
+		const std::string args = rest_of(cmd, "find");
+		if(args.find(',') == std::string::npos || args.rfind("text", 0) == 0 || args.rfind("hex", 0) == 0)
+			return put(dst, dstsz, find_command(d, cmd));
 	}
 
 	std::string out;

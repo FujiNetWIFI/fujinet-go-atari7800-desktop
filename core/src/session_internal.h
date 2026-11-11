@@ -136,6 +136,15 @@ const char *roms_bios_name(struct a7800session *s, int region);
 /* A developer build's embedded images, into the ROM directory, once. */
 void roms_provision_embedded(struct a7800session *s);
 
+/* vidcap.cpp: the Video tab's capture (a7800vidcap.h) of the running host.
+ * enable/disable are counted; get copies the newest capture when its serial
+ * differs from *serial; fill reads the (stopped) machine now. */
+struct a7800vid_capture;
+int  session_capture_running(struct a7800session *s);
+void session_capture_enable(struct a7800session *s, int on);
+int  session_capture_get(struct a7800session *s, struct a7800vid_capture *dst, uint64_t *serial);
+int  session_capture_fill(struct a7800session *s, struct a7800vid_capture *dst);
+
 /* session.cpp: the BIOS choice changed (a new console if running); the
  * HSC choice changed (applies at the next power cycle). */
 void session_machine_changed(struct a7800session *s);

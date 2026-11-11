@@ -38,6 +38,7 @@
 #include <cstdint>
 #include <deque>
 #include <functional>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -45,6 +46,8 @@
 #include <pthread.h>
 
 #include "fngo_mame.h"
+
+struct a7800vid_capture;
 
 class MameHost
 {
@@ -121,6 +124,18 @@ public:
 	uint64_t FrameCount() const { return _frameCount.load(); }
 	void NotifyVsync(int64_t frameTimeNs);
 	double GetFps() const;
+
+	// ---- the Video tab's capture (any thread) ----
+	// While at least one user is enabled, every published frame is captured
+	// on the emulation thread: MARIA's per-row record, the picture and the
+	// beam. Memory is allocated by the first enable.
+	void CaptureEnable(bool on);
+	// Copy the newest capture into dst when its serial differs from
+	// *serial (updated); false when unchanged or none yet.
+	bool CaptureGet(a7800vid_capture* dst, uint64_t* serial);
+	// Read the machine as it is now (a stopped machine): the rows drawn so
+	// far, the beam, the last published frame. Runs on the emulation thread.
+	bool CaptureFill(a7800vid_capture* dst);
 
 	// ---- audio ----
 	void FillAudio(float* out, uint32_t frames);
@@ -199,6 +214,13 @@ private:
 	FrameCallback _frameCb = nullptr;
 	void* _frameCbCtx = nullptr;
 	std::atomic<int> _frameRateMilli { 59958 };
+
+	// ---- the Video tab's capture ----
+	void FillCapture(a7800vid_capture* dst, const uint32_t* xrgb, int width, int height);
+	std::mutex _capLock;
+	std::unique_ptr<a7800vid_capture> _cap;
+	std::unique_ptr<fngo_maria_capture> _capTmp;    // emulation thread only
+	std::atomic<int> _capUsers { 0 };
 
 	// ---- pacing ----
 	std::mutex _vsyncLock;

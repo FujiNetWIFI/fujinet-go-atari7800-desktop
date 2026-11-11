@@ -9,7 +9,8 @@ set_target_properties(a7800_host PROPERTIES
   CXX_STANDARD 17
   CXX_STANDARD_REQUIRED ON
   POSITION_INDEPENDENT_CODE ON)
-target_include_directories(a7800_host PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/mame")
+target_include_directories(a7800_host PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/mame"
+                           "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_link_libraries(a7800_host PUBLIC mame_fngo)
 add_dependencies(a7800_host mame-fngo)
 find_package(Threads REQUIRED)
@@ -94,11 +95,15 @@ set(A7800_SESSION_C_SOURCES
   src/bindings.c
   src/hid_keys.c
   src/help.c
+  src/memtools.c
+  src/m6502dasm.c
+  src/vidtab.c
   "${A7800_ROMS_C}" "${A7800_HELP_C}")
 set(A7800_SESSION_CXX_SOURCES
   src/session.cpp
   src/debug.cpp
-  src/fujitrace.cpp)
+  src/fujitrace.cpp
+  src/vidcap.cpp)
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/gamepad_sdl.c")
   list(APPEND A7800_SESSION_C_SOURCES src/gamepad_sdl.c)
 else()
