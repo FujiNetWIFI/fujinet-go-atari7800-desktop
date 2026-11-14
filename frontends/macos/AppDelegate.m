@@ -292,7 +292,7 @@
  * are still down. */
 - (void)windowDidResignKey:(NSNotification *)note
 {
-    if (note.object == _window) a7800session_release_all(_session);
+    if (_session && note.object == _window) a7800session_release_all(_session);
 }
 
 - (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication *)app
@@ -304,11 +304,17 @@
 - (void)applicationWillTerminate:(NSNotification *)note
 {
     (void)note;
+    /* Close the windows while the session is alive: AppKit closes them after
+     * this returns, and their resign-key / will-close handlers use it. */
+    _window.delegate = nil;
+    for (NSWindow *w in [[NSApp windows] copy])
+        if (w != _window) [w close];
     [_statusTimer invalidate];
     [_sysactTimer invalidate];
     [_display stop];
     a7800session_stop(_session);
     a7800session_free(_session);
+    _session = NULL;
 }
 
 /* Finder opens files here -- at launch before applicationDidFinishLaunching
