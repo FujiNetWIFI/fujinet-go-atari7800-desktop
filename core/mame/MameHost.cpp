@@ -40,6 +40,7 @@ static void JoinMmcss()
 #endif
 
 #include "MameHost.h"
+#include "apple_realtime.h"
 #include "a7800vidcap.h"
 
 static_assert(sizeof(a7800vid_line) == sizeof(fngo_maria_line), "a7800vidcap.h mirrors fngo_maria_line");
@@ -263,6 +264,7 @@ void* MameHost::ThreadMain(void* self)
 void MameHost::ThreadBody()
 {
 	tOnEmulationThread = true;
+	apple_realtime_begin(1e9 / 60.0);   // a real-time slot on macOS; a no-op elsewhere
 #if defined(_WIN32)
 	JoinMmcss();
 #endif

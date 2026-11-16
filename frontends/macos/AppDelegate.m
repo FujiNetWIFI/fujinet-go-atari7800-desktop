@@ -101,6 +101,7 @@
     NSString *_launchFile;      /* a file Finder opened us with, before the session ran */
     NSWindow *_window;
     A7800DisplayView *_display;
+    id<NSObject> _activity;          /* no App Nap, no timer coalescing while we run */
     A7800ContentView *_content;
     NSTimer *_statusTimer;
     NSTimer *_sysactTimer;
@@ -140,6 +141,13 @@
 - (void)applicationDidFinishLaunching:(NSNotification *)note
 {
     (void)note;
+
+    /* An emulator is latency-critical work: App Nap must not throttle the
+     * machine thread or coalesce its timers when the window is behind
+     * another, and Game Mode (Info.plist) asks the system to favour it. */
+    _activity = [[NSProcessInfo processInfo]
+        beginActivityWithOptions:(NSActivityUserInitiated | NSActivityLatencyCritical)
+                          reason:@"Emulating an Atari 7800"];
 
     /* 320x224 shown at 4:3, three times over: a comfortable first window on
      * any Mac. */
@@ -312,6 +320,10 @@
     [_statusTimer invalidate];
     [_sysactTimer invalidate];
     [_display stop];
+    if (_activity) {
+        [[NSProcessInfo processInfo] endActivity:_activity];
+        _activity = nil;
+    }
     a7800session_stop(_session);
     a7800session_free(_session);
     _session = NULL;
