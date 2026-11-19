@@ -66,7 +66,14 @@
     <!-- The CURRENT release templates its version from @PROJECT_VERSION@, so
          it cannot disagree with the tree; past releases are literal. The
          release job checks that this first entry is still a template. -->
-    <release version="@PROJECT_VERSION@" date="2026-11-16">
+    <release version="@PROJECT_VERSION@" date="2026-11-19">
+      <description>
+        <p>
+          The Controllers window now draws the real hardware: the two-button ProLine joystick, the 2600 joystick, the XG-1 light gun or an empty socket for each port, and the console's Select, Reset and Pause keys and difficulty slides. Press and drag them with the mouse; Map, Clear and Defaults change the controls. The keyboard, each gamepad and the mouse are now separate, so letting go of a key no longer drops a direction a gamepad is holding. Each gamepad's player is remembered, and Preferences has a new Input page.
+        </p>
+      </description>
+    </release>
+    <release version="0.8.0" date="2026-11-16">
       <description>
         <p>
           macOS: the picture is drawn with Metal in step with the display, so it is smoother on 60 and 120 Hz screens; the emulator runs with game-grade scheduling priority; and the app opts into macOS Game Mode when it is full screen.
