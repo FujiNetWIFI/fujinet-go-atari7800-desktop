@@ -44,6 +44,12 @@
 #define IDC_SET_HSC        2015
 #define IDC_SET_EXTERNAL   2016
 #define IDC_SET_EXT_ADDR   2017
+#define IDC_SET_RESET_CTRL 2018
+#define IDC_SET_OPEN_CTRL  2019
+
+/* Controls inside the Controllers window. */
+#define IDC_CTRL_TYPE0     2300
+#define IDC_CTRL_TYPE1     2301
 
 #define IDC_LOG_EDIT       2100
 #define IDC_LOG_HELP       2101

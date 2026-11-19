@@ -616,6 +616,17 @@ static LRESULT CALLBACK settings_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             return 0;
         case IDC_SET_AUDIO: settings_apply_checkbox(hwnd, IDC_SET_AUDIO, "enable_audio", 1); return 0;
         case IDC_SET_GAMEPAD: settings_apply_checkbox(hwnd, IDC_SET_GAMEPAD, "enable_gamepad", 1); return 0;
+        case IDC_SET_RESET_CTRL: {
+            /* every key and gamepad button back to its default, every gamepad back to Automatic */
+            const int count = a7800session_gamepad_count(g_session);
+            int idx;
+            a7800session_bindings_reset(g_session);
+            for (idx = 0; idx < count; idx++) a7800session_gamepad_assign(g_session, idx, -1);
+            refresh_pad_list();
+            a7800_controller_window_gamepads_changed();
+            return 0;
+        }
+        case IDC_SET_OPEN_CTRL: a7800_controller_window_show(g_hwnd, g_session); return 0;
         default: break;
         }
         break;
@@ -743,7 +754,7 @@ static void show_settings(HINSTANCE inst)
     settings_combo(g_settings_window, inst, IDC_SET_ASPECT, 120, y, 220, aspect_name, g_aspect);
     y += 36;
 
-    settings_label(g_settings_window, inst, "Controllers (applied immediately)", 16, y, 460, 18); y += 22;
+    settings_label(g_settings_window, inst, "Input settings (applied immediately)", 16, y, 460, 18); y += 22;
     for (port = 0; port < 2; port++) {
         settings_label(g_settings_window, inst, port ? "Player 2:" : "Player 1:", 16, y + 3, 100, 18);
         g_port_combo[port] = settings_combo(g_settings_window, inst, port ? IDC_SET_PORT1 : IDC_SET_PORT0,
@@ -771,6 +782,18 @@ static void show_settings(HINSTANCE inst)
     SendMessageA(g_pad_port, WM_SETFONT, (WPARAM)font, TRUE);
     refresh_pad_list();
     y += 80;
+    settings_checkbox(g_settings_window, inst, "Enable gamepads (applied by restarting the session)", IDC_SET_GAMEPAD, 16, y,
+                      440, a7800session_get_int(g_session, "enable_gamepad", 1));
+    y += 28;
+    {
+        HWND rb = CreateWindowExA(0, "BUTTON", "Reset Controls", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON, 16, y,
+                                  130, 26, g_settings_window, (HMENU)(INT_PTR)IDC_SET_RESET_CTRL, inst, NULL);
+        HWND ob = CreateWindowExA(0, "BUTTON", "Open Controllers", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON, 156,
+                                  y, 140, 26, g_settings_window, (HMENU)(INT_PTR)IDC_SET_OPEN_CTRL, inst, NULL);
+        SendMessageA(rb, WM_SETFONT, (WPARAM)font, TRUE);
+        SendMessageA(ob, WM_SETFONT, (WPARAM)font, TRUE);
+    }
+    y += 40;
 
     settings_label(g_settings_window, inst, "Volume:", 16, y + 3, 100, 18);
     h = CreateWindowExA(0, TRACKBAR_CLASSA, "", WS_CHILD | WS_VISIBLE | TBS_HORZ | TBS_AUTOTICKS,
@@ -794,9 +817,7 @@ static void show_settings(HINSTANCE inst)
     EnableWindow(addrEdit, a7800session_get_int(g_session, "fujinet_external", 0) != 0);
     y += 28;
     settings_checkbox(g_settings_window, inst, "Audio", IDC_SET_AUDIO, 16, y, 200,
-                      a7800session_get_int(g_session, "enable_audio", 1)); y += 26;
-    settings_checkbox(g_settings_window, inst, "Gamepads", IDC_SET_GAMEPAD, 16, y, 200,
-                      a7800session_get_int(g_session, "enable_gamepad", 1));
+                      a7800session_get_int(g_session, "enable_audio", 1));
     y += 40;
 
     /* Fit the window to what went into it. */
@@ -811,7 +832,7 @@ static void show_settings(HINSTANCE inst)
         HWND hb = CreateWindowExA(0, "BUTTON", "Help", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON, 16, y - 34, 80, 26,
                                   g_settings_window, (HMENU)(INT_PTR)IDC_SET_HELP, inst, NULL);
         SendMessageA(hb, WM_SETFONT, (WPARAM)font, TRUE);
-        a7800_help_set_context(g_settings_window, "prefs/Machine", 1);
+        a7800_help_set_context(g_settings_window, "prefs/Input", 1);
     }
     SetTimer(g_settings_window, IDT_SETTINGS_PADS, 500, NULL);
     ShowWindow(g_settings_window, SW_SHOW);
@@ -1046,7 +1067,7 @@ static LRESULT CALLBACK wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     }
     case WM_ACTIVATE:
         if (LOWORD(wp) == WA_INACTIVE) {
-            a7800session_release_all(g_session);
+            a7800session_release_keyboard(g_session);
             memset(g_sysact_down, 0, sizeof g_sysact_down);
         }
         return 0;
@@ -1245,7 +1266,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
 
     g_pad_generation = a7800session_gamepad_generation(g_session);
     SetTimer(g_hwnd, IDT_STATUS, 1000, NULL);
-    SetTimer(g_hwnd, IDT_SYSACT, 100, NULL);
+    SetTimer(g_hwnd, IDT_SYSACT, 50, NULL);
     sync_switch_ui(1);
     update_status();
 
