@@ -258,7 +258,7 @@ static NSBezierPath *polygon(NSPoint ctr, CGFloat rad, int num, double phase)
 }
 
 /* A closed path through normalised points (0..1 of a square), scaled into box. */
-static NSBezierPath *outline(NSRect box, const double (*pts)[2], int num)
+static NSBezierPath *scaledPolygon(NSRect box, const double (*pts)[2], int num)
 {
     NSBezierPath *path = [NSBezierPath bezierPath];
     for (int idx = 0; idx < num; idx++) {
@@ -958,10 +958,10 @@ static void drawFuji(NSPoint ctr, CGFloat high, NSColor *ink)
     static const double sightPts[][2] = { { 0.06, 0.04 }, { 0.10, 0.04 }, { 0.10, 0.11 }, { 0.06, 0.11 } };
     static const double triggerPts[][2] = { { 0.59, 0.47 }, { 0.65, 0.47 }, { 0.66, 0.60 }, { 0.62, 0.64 } };
 
-    NSBezierPath *body = outline(box, bodyPts, 11);
+    NSBezierPath *body = scaledPolygon(box, bodyPts, 11);
     [self shadowOf:body];
-    NSBezierPath *barrel = outline(box, barrelPts, 6);
-    NSBezierPath *sight = outline(box, sightPts, 4);
+    NSBezierPath *barrel = scaledPolygon(box, barrelPts, 6);
+    NSBezierPath *sight = scaledPolygon(box, sightPts, 4);
     [rgb(COL_GUN) setFill];
     [barrel fill];
     [sight fill];
@@ -981,7 +981,7 @@ static void drawFuji(NSPoint ctr, CGFloat high, NSColor *ink)
     }
     strokeLine(NSMakePoint(NSMinX(box) + 0.40 * side, NSMinY(box) + 0.24 * side),
                NSMakePoint(NSMinX(box) + 0.88 * side, NSMinY(box) + 0.38 * side), 1, rgb(COL_GUN_LO));
-    NSBezierPath *trigger = outline(box, triggerPts, 4);
+    NSBezierPath *trigger = scaledPolygon(box, triggerPts, 4);
     [rgb(COL_GUN_TRIGGER) setFill];
     [trigger fill];
 }
