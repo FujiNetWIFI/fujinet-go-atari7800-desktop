@@ -194,27 +194,45 @@ get the gun automatically when the port is on *Auto*.
 The controls are changed in the Controllers window (<kbd>F9</kbd>): click
 **Map**, then click a joystick control or a console switch, then press the key
 or the gamepad button to give it. The control's old key or button is taken from
-it. **Defaults** puts every control back. The map is kept in the settings, and
-only what differs from the defaults is written.
+it. **Clear** takes the key and button off the control you pick, and
+**Defaults** puts every control back. **Show bindings** prints each control's
+key on the picture. The map is kept in the settings, and only what differs from
+the defaults is written. <kbd>F9</kbd>, <kbd>F11</kbd> and <kbd>F12</kbd> belong
+to the app and cannot be given to a control.
+
+There are 19 controls in all: the two ports' four directions and two buttons
+each (12), the five console switches (Select, Reset, Pause and the two
+difficulty switches), and two more, Reboot to CONFIG and Pause the debugger,
+that Map lists but the picture does not show.
 
 <!-- context: controllers -->
 # Controllers window
 
-The Controllers window (<kbd>F9</kbd>) shows both ProLine joysticks and the
-console's switches live, and presses them with the mouse. It floats on its own
-at a fixed size. The controls that are held light up in the accent colour,
+The Controllers window (<kbd>F9</kbd>) draws both controllers and the console's
+switches, and presses them with the mouse. It floats on its own at a fixed
+size. Each port shows what is plugged into it: the **ProLine joystick** (a
+black slab with a grey stick and two red buttons, 1 and 2), the **2600
+joystick**, the **XG-1 light gun**, or an empty socket. The picture follows the
+port's type, and *Auto* follows the running game. Under them is the console: the
+silver band, the **Pause**, **Select** and **Reset** keys, and the two
+difficulty slides. Controls that are held light up in the accent colour,
 whoever holds them: the keyboard, a gamepad or the mouse.
 
 | With the mouse | Does |
 |---|---|
-| Press a stick direction | Holds it |
+| Press and drag on the stick | Holds the direction under the pointer |
 | Press a button | Holds it |
-| Press a switch | Presses it |
+| Press Select, Reset or Pause | Presses it |
+| Click a difficulty slide | Flips it between **A** (pro) and **B** (novice) |
 
-**Map** and **Defaults** change the controls (see
-[Changing the controls](#changing-the-controls)). Switching to another window
-lets go of everything the mouse holds. Keys typed in the Controllers window go
-to the console.
+The slides show which way each switch is set; they are not lit when held. The
+light gun has nothing to press here: aim on the picture.
+
+**Map**, **Clear**, **Defaults** and **Show bindings** change and show the
+controls (see [Changing the controls](#changing-the-controls)). Each port has a
+type menu, and each gamepad a row to pick its player. Switching to another
+window lets go of everything the mouse holds. Keys typed in the Controllers
+window go to the console.
 
 # Machines
 
@@ -374,23 +392,6 @@ On Windows this window is called **Settings** (in the Machine menu).
 - **Smooth scaling**: blend the pixels when the picture is stretched
   (setting `smooth`).
 
-## Controller settings
-
-- **Player 1** and **Player 2**: what is plugged into each port: *Auto*,
-  *ProLine Joystick*, *2600 Joystick*, *XG-1 Light Gun* or *None*. *Auto* plugs
-  in the light gun for the light-gun games and a ProLine joystick otherwise.
-  It applies at once, even to a game booted over FujiNet (settings
-  `port0_type` and `port1_type`).
-- **Left stick drives the joystick**: off, only a gamepad's D-pad moves it
-  (setting `analog_joystick`).
-
-## Gamepad settings
-
-**Gamepads** lists each one plugged in, and which player it drives. A new
-gamepad drives Player 1, the next Player 2; choose *Player 1* or *Player 2* to
-fix it, or *Automatic*. The keys and buttons are changed in the Controllers
-window (see [Changing the controls](#changing-the-controls)).
-
 ## Audio settings
 
 - **Volume**: the output level, 0 to 100 (setting `volume`).
@@ -404,14 +405,34 @@ window (see [Changing the controls](#changing-the-controls)).
   [An external FujiNet](#an-external-fujinet); setting
   `fujinet_external_addr`).
 - **Audio**: open the system audio device (setting `enable_audio`).
-- **Gamepads**: poll USB and Bluetooth gamepads (setting `enable_gamepad`).
 
 ## The settings file
 
 The settings file is `settings.ini` (see [Files and folders](#files-and-folders)).
 Each setting above names its key. The other keys are `cart` (the opened
-cartridge, empty for CONFIG), `left_diff` and `right_diff` (the difficulty
-switches), and `bindings` (the controls that differ from the defaults).
+cartridge, empty for CONFIG), `controllers_show_bindings`, `left_diff` and
+`right_diff` (the difficulty switches), and `bindings` (the controls that differ from the defaults).
+
+<!-- context: prefs/Input -->
+## Input settings
+
+- **Player 1** and **Player 2**: what is plugged into each port: *Auto*,
+  *ProLine Joystick*, *2600 Joystick*, *XG-1 Light Gun* or *None*. *Auto* plugs
+  in the light gun for the light-gun games and a ProLine joystick otherwise.
+  It applies at once, even to a game booted over FujiNet (settings
+  `port0_type` and `port1_type`).
+- **Left stick drives the joystick**: off, only a gamepad's D-pad moves it
+  (setting `analog_joystick`).
+- **Gamepads**: poll USB and Bluetooth gamepads (setting `enable_gamepad`).
+- **Reset Controls** puts every key and button back to its default.
+- **Open Controllers** shows the Controllers window.
+
+**Gamepads** lists each one plugged in, and which player it drives. A new
+gamepad drives Player 1, the next Player 2; choose *Player 1* or *Player 2* to
+fix it, or *Automatic*. The choice is remembered for that gamepad (setting
+`pad_assign`) and comes back when it is plugged in again. The keys and buttons
+are changed in the Controllers window (see
+[Changing the controls](#changing-the-controls)).
 
 # Debugger
 

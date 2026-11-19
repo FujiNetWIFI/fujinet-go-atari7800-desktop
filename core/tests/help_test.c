@@ -26,7 +26,7 @@ static const char *const platform_names[] = { "GNOME", "KDE", "Windows", "macOS"
 
 /* What the frontends' Help buttons and menus open. */
 static const char *const contexts[] = {
-    "main", "import-sd", "controllers", "fujilog", "prefs/Machine",
+    "main", "import-sd", "controllers", "fujilog", "prefs/Machine", "prefs/Input",
     "debugger/console", "debugger/disassembly", "debugger/memory", "debugger/breakpoints",
     "debugger/watches", "debugger/cart", "debugger/trace", "debugger/history",
     "debugger/video", "debugger/sound", "debugger/symbols", "debugger/fujinet",
@@ -50,7 +50,7 @@ static const struct {
 static const char *const settings_keys[] = {
     "region", "hsc", "aspect", "smooth", "port0_type", "port1_type", "analog_joystick", "volume",
     "enable_fujinet", "fujinet_external", "fujinet_external_addr", "enable_audio", "enable_gamepad",
-    "cart", "left_diff", "right_diff", "bindings",
+    "cart", "left_diff", "right_diff", "bindings", "pad_assign", "controllers_show_bindings",
 };
 
 /* The app's shortcuts, as a PC and as a Mac shows them. */

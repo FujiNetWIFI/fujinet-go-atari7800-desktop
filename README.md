@@ -84,10 +84,13 @@ desktop app, with no BIOS needed. A member of the FujiNet Go desktop family
   engine is MAME's.
 - **Gamepads that come and go.** SDL3 hot-plug: a pad plugged in while a game
   runs is assigned to the next free player within a second, unplugging
-  releases it, and a pad that comes back gets its player back; each event is
-  shown in the window. The **Controllers** window shows both ProLine
-  joysticks and the console's switches live, presses them with the mouse,
-  and rebinds any control to a key or gamepad button (Map).
+  releases it, and a pad that comes back gets its player back (the choice is
+  remembered); each event is shown in the window. The **Controllers** window
+  draws both ports as the real hardware (the two-button ProLine joystick, the
+  2600 joystick, the XG-1 light gun, or an empty socket) and the console's
+  Select, Reset and Pause keys and difficulty slides; it shows them live,
+  presses them with the mouse, and rebinds any control to a key or gamepad
+  button (Map, Clear, Defaults).
 
 The icon is the family mark, inverted as on the Atari 2600's, on a slightly
 deeper orange (`#F0932F`, the 2600's is `#FFA645`); the same orange is the UI
@@ -186,7 +189,7 @@ closes the old cartridge's link before the new cartridge dials.
 | Light gun | aim with the mouse; left click is the trigger |
 | Fullscreen / Controllers / Debugger | F11 / F9 / F12 (debugger: F5 run/stop, F7 step, F8 step over, Shift+F8 step out) |
 
-Every control is remappable in the Controllers window.
+Every control is remappable in the Controllers window (19 in all).
 
 ## How this was verified
 
