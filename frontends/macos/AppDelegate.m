@@ -22,6 +22,9 @@
  * picture. */
 #define TOAST_SECONDS 3.0
 
+/* Gamepad rows in Settings' Input group (the Controllers window has the same). */
+#define MAX_SETTINGS_PADS 4
+
 @class A7800AppDelegate;
 
 /* The content view sits between AppKit and the session: it forwards keys
@@ -36,6 +39,10 @@
 - (void)runSysaction:(int)sa;
 - (void)loadMedia:(NSString *)path;
 - (void)flipSwitch:(int)sw;
+- (void)refreshPadList;
+- (void)fitSettings;
+- (void)resetControls:(id)sender;
+- (void)openControllers:(id)sender;
 @end
 
 @implementation A7800ContentView
@@ -117,7 +124,11 @@
     NSWindow *_settingsWindow;
     NSTextField *_externalField;
     BOOL _sessionDirty;
-    NSPopUpButton *_padList, *_padPort, *_aspectPopup;
+    NSPopUpButton *_aspectPopup;
+    NSTextField *_padName[MAX_SETTINGS_PADS];      /* the Input group's gamepad rows */
+    NSPopUpButton *_padAssign[MAX_SETTINGS_PADS];
+    NSGridView *_settingsGrid;
+    NSInteger _padRowBase;                         /* the grid row of the first gamepad row */
     NSPopUpButton *_portPopup[2];
     NSPopUpButton *_biosPopup[2];   /* the NTSC console's, the PAL console's */
     NSButton *_hscBox;
@@ -300,7 +311,7 @@
  * are still down. */
 - (void)windowDidResignKey:(NSNotification *)note
 {
-    if (_session && note.object == _window) a7800session_release_all(_session);
+    if (_session && note.object == _window) a7800session_release_keyboard(_session);
 }
 
 - (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication *)app
@@ -700,40 +711,63 @@
     [self refreshPortTitles];
 }
 
+/* The Input group's gamepad rows: one per connected pad (up to four), its name and
+ * the player it is set to. Rows with no pad are hidden; the first says so. */
 - (void)refreshPadList
 {
-    const NSInteger sel = _padList.indexOfSelectedItem;
-    [_padList removeAllItems];
-    const int n = a7800session_gamepad_count(_session);
-    if (n == 0) [_padList addItemWithTitle:@"(no gamepads connected)"];
-    for (int i = 0; i < n; i++) {
+    const int count = a7800session_gamepad_count(_session);
+    _padGeneration = a7800session_gamepad_generation(_session);
+    for (int row = 0; row < MAX_SETTINGS_PADS; row++) {
+        const BOOL shown = row < count;
         char name[128];
-        const int eff = a7800session_gamepad_effective_port(_session, i);
-        a7800session_gamepad_name(_session, i, name, sizeof name);
-        /* Menu items with equal titles collapse; the index keeps them apart. */
-        [_padList addItemWithTitle:(eff >= 0
-            ? [NSString stringWithFormat:@"%d: %s  [player %d]", i + 1, name, eff + 1]
-            : [NSString stringWithFormat:@"%d: %s  [unused]", i + 1, name])];
+        name[0] = '\0';
+        if (shown) a7800session_gamepad_name(_session, row, name, sizeof name);
+        const int eff = shown ? a7800session_gamepad_effective_port(_session, row) : -1;
+        NSString *text;
+        if (!shown) text = row == 0 ? @"(no gamepads connected)" : @"";
+        else if (eff >= 0) text = [NSString stringWithFormat:@"%s  [player %d]", name, eff + 1];
+        else text = [NSString stringWithFormat:@"%s  [unused]", name];
+        _padName[row].stringValue = text;
+        _padAssign[row].hidden = !shown;
+        if (shown) {
+            const int assign = a7800session_gamepad_assignment(_session, row);
+            [_padAssign[row] selectItemAtIndex:(assign < 0 || assign >= A7800_PORTS ? 0 : assign + 1)];
+        }
+        if (_settingsGrid) [_settingsGrid rowAtIndex:_padRowBase + row].hidden = !shown && row > 0;
     }
-    if (sel >= 0 && sel < n) [_padList selectItemAtIndex:sel];
-    [self padSelected:nil];
+    [self fitSettings];
 }
 
-- (void)padSelected:(id)sender
+/* The window follows its content when gamepad rows come and go. */
+- (void)fitSettings
 {
-    (void)sender;
-    const NSInteger sel = _padList.indexOfSelectedItem;
-    if (sel >= 0 && sel < a7800session_gamepad_count(_session))
-        [_padPort selectItemAtIndex:a7800session_gamepad_assignment(_session, (int)sel) + 1];
+    if (!_settingsWindow || !_settingsWindow.contentView) return;
+    const NSSize fit = _settingsWindow.contentView.fittingSize;
+    if (fit.width > 0 && fit.height > 0) [_settingsWindow setContentSize:fit];
 }
 
-- (void)padPortChanged:(id)sender
+- (void)padAssignChanged:(NSPopUpButton *)sender
 {
-    (void)sender;
-    const NSInteger sel = _padList.indexOfSelectedItem;
-    if (sel >= 0 && sel < a7800session_gamepad_count(_session))
-        a7800session_gamepad_assign(_session, (int)sel, (int)_padPort.indexOfSelectedItem - 1);
+    a7800session_gamepad_assign(_session, (int)sender.tag, (int)sender.indexOfSelectedItem - 1);
     [self refreshPadList];
+    [A7800ControllersWindow refresh];
+}
+
+/* Reset Controls: the default keys and gamepad buttons, every gamepad back on Automatic. */
+- (void)resetControls:(id)sender
+{
+    (void)sender;
+    a7800session_bindings_reset(_session);
+    for (int idx = 0, n = a7800session_gamepad_count(_session); idx < n; idx++)
+        a7800session_gamepad_assign(_session, idx, -1);
+    [self refreshPadList];
+    [A7800ControllersWindow refresh];
+}
+
+- (void)openControllers:(id)sender
+{
+    (void)sender;
+    [A7800ControllersWindow showWithSession:_session];
 }
 
 - (void)volumeChanged:(NSSlider *)sender
@@ -813,13 +847,16 @@
         return;
     }
 
-    _padList = [[NSPopUpButton alloc] init];
-    _padList.target = self;
-    _padList.action = @selector(padSelected:);
-    _padPort = [[NSPopUpButton alloc] init];
-    [_padPort addItemsWithTitles:@[@"Automatic", @"Player 1", @"Player 2"]];
-    _padPort.target = self;
-    _padPort.action = @selector(padPortChanged:);
+    for (int row = 0; row < MAX_SETTINGS_PADS; row++) {
+        _padName[row] = [NSTextField labelWithString:@""];
+        _padName[row].lineBreakMode = NSLineBreakByTruncatingTail;
+        [_padName[row].widthAnchor constraintEqualToConstant:300].active = YES;
+        _padAssign[row] = [[NSPopUpButton alloc] init];
+        [_padAssign[row] addItemsWithTitles:@[@"Automatic", @"Player 1", @"Player 2"]];
+        _padAssign[row].tag = row;
+        _padAssign[row].target = self;
+        _padAssign[row].action = @selector(padAssignChanged:);
+    }
 
     _aspectPopup = [[NSPopUpButton alloc] init];
     [_aspectPopup addItemsWithTitles:@[@"4:3 TV", @"Square pixels"]];
@@ -848,10 +885,7 @@
     _externalField.action = @selector(externalAddrChanged:);
     [_externalField.cell setSendsActionOnEndEditing:YES];
 
-    NSStackView *padRow = [NSStackView stackViewWithViews:@[_padList, _padPort]];
-    padRow.orientation = NSUserInterfaceLayoutOrientationHorizontal;
-
-    NSArray<NSArray<NSView *> *> *rows = @[
+    NSMutableArray<NSArray<NSView *> *> *rows = [NSMutableArray arrayWithArray:@[
         @[ [self sectionLabel:@"Machine"], [self note:@"the TV system and the BIOS take effect at once (a new console)"] ],
         @[ [NSTextField labelWithString:@"TV system"],
            [self popUpForKey:"region" fallback:A7800_REGION_AUTO names:a7800_region_name] ],
@@ -860,12 +894,30 @@
         @[ [NSTextField labelWithString:@""], [self note:@"No BIOS is needed. Machine ▸ Import BIOS… adds your own."] ],
         @[ [NSTextField labelWithString:@""], _hscBox ],
         @[ [NSTextField labelWithString:@"Picture"], _aspectPopup ],
-        @[ [self sectionLabel:@"Controllers"], [self note:@"applied immediately"] ],
+        @[ [self sectionLabel:@"Input"], [self note:@"applied immediately, except Gamepads"] ],
         @[ [NSTextField labelWithString:@"Player 1"], _portPopup[0] ],
         @[ [NSTextField labelWithString:@"Player 2"], _portPopup[1] ],
+        @[ [NSTextField labelWithString:@""], [self checkBoxForKey:"enable_gamepad" title:@"Gamepads (applied when this window closes)" fallback:1] ],
         @[ [NSTextField labelWithString:@""],
            [self checkBoxForKey:"analog_joystick" title:@"Analog sticks drive the joystick" fallback:1] ],
-        @[ [NSTextField labelWithString:@"Gamepads"], padRow ],
+    ]];
+    _padRowBase = (NSInteger)rows.count;
+    for (int row = 0; row < MAX_SETTINGS_PADS; row++) {
+        NSStackView *padRow = [NSStackView stackViewWithViews:@[_padName[row], _padAssign[row]]];
+        padRow.orientation = NSUserInterfaceLayoutOrientationHorizontal;
+        [rows addObject:@[ [NSTextField labelWithString:(row == 0 ? @"Gamepads" : @"")], padRow ]];
+    }
+    {
+        NSButton *reset = [NSButton buttonWithTitle:@"Reset Controls" target:self action:@selector(resetControls:)];
+        NSButton *open = [NSButton buttonWithTitle:@"Open Controllers" target:self action:@selector(openControllers:)];
+        NSButton *inputHelp = A7800HelpButton(@"prefs/Input");
+        NSStackView *buttons = [NSStackView stackViewWithViews:@[reset, open, inputHelp]];
+        buttons.orientation = NSUserInterfaceLayoutOrientationHorizontal;
+        [rows addObject:@[ [NSTextField labelWithString:@""], buttons ]];
+        [rows addObject:@[ [NSTextField labelWithString:@""],
+                           [self note:@"Keys and gamepad buttons are mapped in the Controllers window (F9)."] ]];
+    }
+    [rows addObjectsFromArray:@[
         @[ [NSTextField labelWithString:@"Volume"], volume ],
         @[ [self sectionLabel:@"Host"], [self note:@"applied by restarting the session"] ],
         @[ [NSTextField labelWithString:@""], [self checkBoxForKey:"enable_fujinet" title:@"Enable FujiNet" fallback:1] ],
@@ -873,10 +925,10 @@
         @[ [NSTextField labelWithString:@"Address:port"], _externalField ],
         @[ [NSTextField labelWithString:@""], [self note:@"dials another FujiNet instance listening there (its [BOIP] port)"] ],
         @[ [NSTextField labelWithString:@""], [self checkBoxForKey:"enable_audio" title:@"Audio" fallback:1] ],
-        @[ [NSTextField labelWithString:@""], [self checkBoxForKey:"enable_gamepad" title:@"Gamepads" fallback:1] ],
-    ];
+    ]];
 
     NSGridView *grid = [NSGridView gridViewWithViews:rows];
+    _settingsGrid = grid;
     grid.rowSpacing = 8;
     grid.columnSpacing = 12;
     [grid columnAtIndex:0].xPlacement = NSGridCellPlacementTrailing;
@@ -904,6 +956,7 @@
         _settingsWindow.contentView = wrap;
         A7800SetHelpContext(_settingsWindow, @"prefs/Machine");
     }
+    [self fitSettings];
     [_settingsWindow center];
 
     _padGeneration = a7800session_gamepad_generation(_session);
