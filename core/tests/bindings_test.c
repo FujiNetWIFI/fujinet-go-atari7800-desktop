@@ -58,6 +58,28 @@ int main(void)
     check(b.keysym == 0, "the old holder lost the key");
     check(a7800session_target_for_key(s, 'x') == A7800_TARGET_PORT(1, A7800_ACT_BUTTON2), "the new holder has it");
 
+    /* the frontends' keys: F9, F11, F12 are never bindable */
+    stolen[0] = 'x';
+    a7800session_binding_set_key(s, A7800_TARGET_PORT(0, A7800_ACT_UP), A7800_KEYSYM_F9, stolen, sizeof stolen);
+    check(stolen[0] == 0 && a7800session_binding_get(s, A7800_TARGET_PORT(0, A7800_ACT_UP)).keysym == A7800_KEYSYM_UP,
+          "F9 is refused and the old key stays");
+    a7800session_binding_set_key(s, A7800_TARGET_PORT(0, A7800_ACT_UP), A7800_KEYSYM_F11, NULL, 0);
+    a7800session_binding_set_key(s, A7800_TARGET_PORT(0, A7800_ACT_UP), A7800_KEYSYM_F12, NULL, 0);
+    check(a7800session_binding_get(s, A7800_TARGET_PORT(0, A7800_ACT_UP)).keysym == A7800_KEYSYM_UP, "F11 and F12 too");
+    check(a7800session_target_for_key(s, A7800_KEYSYM_F9) == -1 && a7800session_target_for_key(s, A7800_KEYSYM_F12) == -1,
+          "no target for them");
+    check(a7800session_key_reserved(A7800_KEYSYM_F9) && a7800session_key_reserved(A7800_KEYSYM_F11) &&
+          a7800session_key_reserved(A7800_KEYSYM_F12) && !a7800session_key_reserved(A7800_KEYSYM_F8), "key_reserved");
+    check(a7800session_binding_get(s, A7800_TARGET_SWITCH(A7800_SW_LEFT_DIFF)).keysym == 0, "the difficulty switches have no default key (Alt+L / Alt+R are menu accelerators)");
+
+    /* clear: both the key and the pad button of a target go, and it persists */
+    a7800session_binding_set_key(s, A7800_TARGET_PORT(1, A7800_ACT_BUTTON1), 'g', NULL, 0);
+    a7800session_binding_set_button(s, A7800_TARGET_PORT(1, A7800_ACT_BUTTON1), A7800_PAD_BTN_NORTH, NULL, 0);
+    a7800session_binding_clear(s, A7800_TARGET_PORT(1, A7800_ACT_BUTTON1));
+    b = a7800session_binding_get(s, A7800_TARGET_PORT(1, A7800_ACT_BUTTON1));
+    check(b.keysym == 0 && b.button == A7800_PAD_BTN_NONE, "clear unbinds the key and the button");
+    check(a7800session_target_for_key(s, 'g') == -1 && a7800session_target_for_key(s, 'n') == -1, "and nothing else got them");
+
     /* names */
     a7800session_keysym_name(A7800_KEYSYM_F12, name, sizeof name);
     check(strcmp(name, "F12") == 0, "F12 names itself");
@@ -81,6 +103,8 @@ int main(void)
     a7800session_free(s);
     s = a7800session_new(&p);
     check(s && a7800session_target_for_key(s, 'x') == A7800_TARGET_PORT(1, A7800_ACT_BUTTON2), "the rebinding persisted");
+    b = a7800session_binding_get(s, A7800_TARGET_PORT(1, A7800_ACT_BUTTON1));
+    check(b.keysym == 0 && b.button == A7800_PAD_BTN_NONE, "so did the cleared target (bindings_init ran at session start)");
     a7800session_bindings_reset(s);
     check(a7800session_target_for_key(s, 'x') == A7800_TARGET_PORT(0, A7800_ACT_BUTTON2), "reset restores the defaults");
     a7800session_free(s);

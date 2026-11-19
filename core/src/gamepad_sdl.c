@@ -13,17 +13,24 @@
  *
  * What a pad drives is the port's joystick: the D-pad (and, with "analog
  * sticks drive the joystick" on, the left stick as an eight-way switch with
- * hysteresis) is the stick; its two buttons come from the bindings table. A
- * port set to "None" takes nothing.
+ * hysteresis) is the stick; its two buttons and the console's switches come
+ * from the bindings table. A port set to a light gun takes only the trigger
+ * (Button 1) from a pad, and one set to None takes no directions.
  *
  * Buttons go through the bindings table (a port's buttons, the console's
  * switches, the system actions); a D-pad direction the user has bound to
  * something explicit stops also nudging the directional role.
  *
  * Pads are assigned to ports in connection order unless assigned explicitly.
- * A pad that is unplugged and plugged back in (matched by its SDL GUID and
- * name) gets its explicit assignment back, and every connect/disconnect is
- * reported to the session for the frontend's toast.
+ * An explicit assignment is remembered (settings key "pad_assign", see
+ * pad_assign.h): a pad that is unplugged and plugged back in, or is there on
+ * the next run (matched by its SDL GUID, else its name), gets it back, and
+ * every connect/disconnect is reported to the session for the frontend's toast.
+ *
+ * Everything a pad holds is its own source (input_merge.h): its buttons and
+ * its stick are separate, so a pad letting go never cancels the keyboard, the
+ * window or another pad, and a pad that is unplugged lets go of exactly what
+ * it held.
  *
  * Copyright (C) 2026 Thomas Cherryhomes
  * SPDX-License-Identifier: GPL-3.0-or-later
@@ -38,9 +45,11 @@
 #include <SDL3/SDL.h>
 
 #include "gamepad_sdl.h"
+#include "input_merge.h"
+#include "pad_assign.h"
 #include "session_internal.h"
 
-#define MAX_PADS 8
+#define MAX_PADS A7800_MAX_PADS
 #define MAX_HATS 4
 
 /* A third of full deflection engages, a sixth releases: low enough that a
@@ -52,15 +61,25 @@
 
 typedef struct {
     SDL_JoystickID id;
+    int owner;                /* the input_merge.h source number for this pad: stable
+                               * while it is connected, whatever its slot */
     SDL_Gamepad *handle;      /* mapped gamepad, or NULL */
     SDL_Joystick *joy;        /* raw joystick when not a gamepad */
     int assign;               /* explicit port, -1 = automatic */
+    int by_name;              /* assign was restored from a name-only match
+                               * (the entry's GUID differs): an exact-GUID
+                               * pad may take it over */
     int port;                 /* the port it drove on the last poll, or -1 */
     int stick_dir;            /* left stick's four-way state (hysteresis) */
     int dpad_dir;             /* D-pad / hat 0 state */
     uint8_t sent[A7800_ACT_PER_PORT]; /* directional actions currently held */
+    /* What each button's press asserted (target + 1, 0 = nothing), so its
+     * release lets go of exactly that even if the binding changed meanwhile,
+     * and a pad that goes away drops what it held. */
+    int16_t btn_target[256];
     SDL_GUID guid;
-    char name[64];
+    char guidstr[A7800_PAD_GUID_MAX];   /* guid as hex, for the pad_assign table */
+    char name[A7800_PAD_NAME_MAX];
     int trigger_down[2];
     Uint8 last_hat[MAX_HATS];
 } pad_slot;
@@ -74,11 +93,13 @@ typedef struct {
     pad_slot pads[MAX_PADS];
     int npads;
     unsigned generation;
+    int quiet_scan;           /* the first scan of a restarted session re-finds
+                               * pads without announcing them */
     /* Map-mode capture */
     int cap_active, cap_have, cap_result;
-    /* explicit assignments of pads that went away, for when they come back */
-    struct { SDL_GUID guid; char name[64]; int assign; int used; } gone[MAX_PADS];
-    int gone_next;
+    /* the remembered explicit assignments (the "pad_assign" setting), for
+     * pads that are away as well as those here; guarded by lock */
+    a7800_pad_table table;
 } gamepad_state;
 
 static gamepad_state *g_state;   /* one per process: SDL's subsystem is */
@@ -173,13 +194,9 @@ static const char *slot_name(const pad_slot *slot)
 
 static void slot_release_all(gamepad_state *g, pad_slot *slot)
 {
-    int a;
-    if (slot->port < 0) return;
-    for (a = 0; a < A7800_ACT_PER_PORT; a++)
-        if (slot->sent[a]) {
-            slot->sent[a] = 0;
-            session_gamepad_apply(g->session, slot->port, a, 0);
-        }
+    memset(slot->sent, 0, sizeof slot->sent);
+    memset(slot->btn_target, 0, sizeof slot->btn_target);
+    input_pad_clear(g->session, slot->owner);
 }
 
 static void slot_close(gamepad_state *g, pad_slot *slot)
@@ -193,12 +210,43 @@ static void slot_close(gamepad_state *g, pad_slot *slot)
 
 static int effective_port_locked(gamepad_state *g, int idx);
 
+/* Gives the pad in slot idx its remembered port. An entry with the pad's own
+ * GUID is the pad's: it takes it from a pad that got it only through the name
+ * fallback. A pad known only by name takes the entry if no other pad carries
+ * it (two identical pads, or one pad known under two GUIDs): then this one
+ * stays automatic. Locked by the caller; only reads g->table, never writes. */
+static void restore_assignment(gamepad_state *g, int idx)
+{
+    pad_slot *slot = &g->pads[idx];
+    int ent = a7800_pad_table_find(&g->table, slot->guidstr, slot->name), k;
+    int exact;
+
+    /* a port the console does not have (2-port BIOS): the pad stays automatic, the
+     * entry stays in the table for a console that has it */
+    if (ent < 0 || g->table.entry[ent].port >= A7800_PORTS) return;
+    exact = !strcmp(g->table.entry[ent].guid, slot->guidstr);
+    for (k = 0; k < g->npads; k++) {
+        pad_slot *other = &g->pads[k];
+        if (k == idx || other->assign < 0 ||
+            a7800_pad_table_find(&g->table, other->guidstr, other->name) != ent)
+            continue;
+        if (!exact || !other->by_name) return;
+        other->assign = -1;          /* the entry's owner is here: it wins */
+        other->by_name = 0;
+    }
+    slot->assign = g->table.entry[ent].port;
+    slot->by_name = !exact;
+}
+
 /* Idempotent, and the single place the gamepad/joystick decision is made:
  * both SDL_EVENT_JOYSTICK_ADDED and SDL_EVENT_GAMEPAD_ADDED land here (SDL
  * posts both for a mapped device) and the slot_for_id guard makes the second
  * one a no-op. */
 static void open_pad(gamepad_state *g, SDL_JoystickID id)
 {
+    char msg[128];
+    int announce = 0;
+
     pthread_mutex_lock(&g->lock);
     if (g->npads < MAX_PADS && slot_for_id(g, id) < 0) {
         /* Not an else-if on SDL_IsGamepad: a device SDL calls a gamepad can
@@ -208,8 +256,12 @@ static void open_pad(gamepad_state *g, SDL_JoystickID id)
         SDL_Joystick *j = gp ? NULL : SDL_OpenJoystick(id);
         if (gp || j) {
             pad_slot *slot = &g->pads[g->npads++];
-            int h;
+            int h, k, used = 0, port;
+            for (k = 0; k < g->npads - 1; k++)
+                used |= 1 << g->pads[k].owner;
             memset(slot, 0, sizeof *slot);
+            for (k = 0; k < MAX_PADS && (used & (1 << k)); k++) {}
+            slot->owner = k;
             slot->id = id;
             slot->handle = gp;
             slot->joy = j;
@@ -218,55 +270,43 @@ static void open_pad(gamepad_state *g, SDL_JoystickID id)
             for (h = 0; h < MAX_HATS; h++) slot->last_hat[h] = SDL_HAT_CENTERED;
             slot->guid = SDL_GetJoystickGUIDForID(id);
             snprintf(slot->name, sizeof slot->name, "%s", slot_name(slot));
-            for (h = 0; h < MAX_PADS; h++) {
-                if (g->gone[h].used && !memcmp(&g->gone[h].guid, &slot->guid, sizeof slot->guid)
-                    && !strcmp(g->gone[h].name, slot->name)) {
-                    slot->assign = g->gone[h].assign;
-                    g->gone[h].used = 0;
-                    break;
-                }
-            }
-            g->generation++;
+            SDL_GUIDToString(slot->guid, slot->guidstr, sizeof slot->guidstr);
+            restore_assignment(g, g->npads - 1);
             fprintf(stderr, "a7800 gamepad: %s connected (%s)\n", slot->name,
                     gp ? "gamepad" : "raw joystick");
-            {
-                char msg[128];
-                int port = effective_port_locked(g, g->npads - 1);
+            if (!g->quiet_scan) {
+                port = effective_port_locked(g, g->npads - 1);
                 if (port >= 0)
                     snprintf(msg, sizeof msg, "Connected: %s (player %d)", slot->name, port + 1);
                 else
                     snprintf(msg, sizeof msg, "Connected: %s", slot->name);
-                session_gamepad_event(g->session, msg);
+                g->generation++;
+                announce = 1;
             }
         }
     }
     pthread_mutex_unlock(&g->lock);
+    if (announce) session_gamepad_event(g->session, msg);
 }
 
 static void close_pad(gamepad_state *g, SDL_JoystickID id)
 {
-    int idx, i;
+    char msg[128];
+    int idx, i, announce = 0;
     pthread_mutex_lock(&g->lock);
     idx = slot_for_id(g, id);
     if (idx >= 0) {
-        pad_slot *slot = &g->pads[idx];
-        char msg[128];
-        fprintf(stderr, "a7800 gamepad: %s disconnected\n", slot->name);
-        snprintf(msg, sizeof msg, "Disconnected: %s", slot->name);
-        if (slot->assign >= 0) {
-            int k = g->gone_next++ % MAX_PADS;
-            g->gone[k].guid = slot->guid;
-            memcpy(g->gone[k].name, slot->name, sizeof g->gone[k].name);
-            g->gone[k].assign = slot->assign;
-            g->gone[k].used = 1;
-        }
-        slot_close(g, slot);
-        session_gamepad_event(g->session, msg);
+        fprintf(stderr, "a7800 gamepad: %s disconnected\n", g->pads[idx].name);
+        snprintf(msg, sizeof msg, "Disconnected: %s", g->pads[idx].name);
+        /* its explicit assignment stays in the table: it comes back with it */
+        slot_close(g, &g->pads[idx]);
         for (i = idx; i < g->npads - 1; i++) g->pads[i] = g->pads[i + 1];
         g->npads--;
         g->generation++;
+        announce = 1;
     }
     pthread_mutex_unlock(&g->lock);
+    if (announce) session_gamepad_event(g->session, msg);
 }
 
 /* ---- buttons ---------------------------------------------------------------- */
@@ -274,17 +314,39 @@ static void close_pad(gamepad_state *g, SDL_JoystickID id)
 /* The port a slot drives right now. Locked by the caller. */
 static int effective_port_locked(gamepad_state *g, int idx)
 {
-    int assign[MAX_PADS], i, port;
+    int assign[MAX_PADS], i, port, nports = A7800_PORTS;
     for (i = 0; i < MAX_PADS; i++) assign[i] = -1;
-    for (i = 0; i < g->npads; i++) assign[i] = g->pads[i].assign;
-    for (port = 0; port < 2; port++)
+    /* a port the console lost (the 2-port BIOS) is no assignment: Automatic */
+    for (i = 0; i < g->npads; i++)
+        assign[i] = g->pads[i].assign < nports ? g->pads[i].assign : -1;
+    for (port = 0; port < nports; port++)
         if (a7800_pad_for_port(assign, g->npads, port) == idx) return port;
     return -1;
 }
 
+static int is_sysact(int target)
+{
+    return target >= A7800_TARGET_SYSACT(0);
+}
+
+/* The slot's port as of now. When it has changed -- the pad was assigned
+ * elsewhere, or the console lost the port (the 2-port BIOS) -- what it held
+ * belongs to the old arrangement and is let go. A pad that had no port holds
+ * nothing. Called by the poll and by the button dispatch alike, so a button is
+ * always pressed on the port the pad has at that moment: a press that lands
+ * just before the poll that would have noticed the move is not undone by it.
+ * Locked by the caller. */
+static void slot_sync_port(gamepad_state *g, pad_slot *slot, int port)
+{
+    if (port == slot->port) return;
+    if (slot->port >= 0) slot_release_all(g, slot);
+    slot->port = port;
+    slot->stick_dir = 0;
+}
+
 static void dispatch_button(gamepad_state *g, SDL_JoystickID which, int b, int down)
 {
-    int idx, port, target;
+    int idx, port, owner = 0, target = -1;
     if (b == A7800_PAD_BTN_NONE) return;
 
     pthread_mutex_lock(&g->lock);
@@ -298,20 +360,29 @@ static void dispatch_button(gamepad_state *g, SDL_JoystickID which, int b, int d
     }
     idx = slot_for_id(g, which);
     port = idx >= 0 ? effective_port_locked(g, idx) : -1;
+    if (idx >= 0) slot_sync_port(g, &g->pads[idx], port);
+    if (idx >= 0 && port >= 0 && b >= 0 && b < 256) {
+        pad_slot *slot = &g->pads[idx];
+        owner = slot->owner;
+        if (down) {
+            target = a7800session_target_for_button(g->session, port, b);
+            if (target >= 0 && !is_sysact(target))
+                slot->btn_target[b] = (int16_t)(target + 1);
+        } else if (slot->btn_target[b]) {
+            /* what the press asserted, whatever the binding says now */
+            target = slot->btn_target[b] - 1;
+            slot->btn_target[b] = 0;
+        }
+    }
     pthread_mutex_unlock(&g->lock);
-    if (port < 0) return;
-
-    target = a7800session_target_for_button(g->session, port, b);
     if (target < 0) return;
-    if (target >= A7800_TARGET_SYSACT(0)) {
+
+    /* a system action is posted, on the press only, for the UI thread */
+    if (is_sysact(target)) {
         if (down) a7800session_sysaction_post(g->session, target - A7800_TARGET_SYSACT(0));
         return;
     }
-    if (target < 2 * A7800_ACT_PER_PORT)
-        session_gamepad_apply(g->session, target / A7800_ACT_PER_PORT,
-                              target % A7800_ACT_PER_PORT, down);
-    else
-        a7800session_press(g->session, target, down);
+    input_press(g->session, A7800_SRC_PAD(owner), target, down);
 }
 
 static int hat_dir_from_mask(Uint8 mask)
@@ -410,28 +481,23 @@ typedef struct {
 static void poll_one(gamepad_state *g, pad_slot *slot, int port,
                      trigger_edge *edges, int *nedges)
 {
-    const struct a7800session *s = g->session;
+    struct a7800session *s = g->session;
     uint8_t want[A7800_ACT_PER_PORT];
-    int type, dir, a;
+    int type, dir, act;
     float lx, ly;
 
     memset(want, 0, sizeof want);
-    if (port != slot->port) {
-        /* moved to another port (or none): release what it held there */
-        slot_release_all(g, slot);
-        slot->port = port;
-        slot->stick_dir = 0;
-        if (port < 0) return;
-    }
+    slot_sync_port(g, slot, port);   /* moved, or the console lost the port: start again */
+    if (port < 0) return;   /* a pad with no port (more pads than ports) plays nothing */
 
-    /* what the port has now: AUTO is whatever the running game asked for */
-    type = s->opts.port_type[port];
-    if (type == A7800_CTRL_AUTO) type = s->detected[port];
     slot->dpad_dir = slot_dpad(g, slot, port);
     slot_stick(slot, 0, &lx, &ly);
 
-    /* joysticks take the directions; a light gun aims with the pointer and
+    /* what the port has now: AUTO is whatever the running game asked for. A
+     * joystick takes the directions; a light gun aims with the pointer and
      * takes only its trigger (Button 1) from a pad */
+    type = s->opts.port_type[port];
+    if (type == A7800_CTRL_AUTO) type = s->detected[port];
     if (type == A7800_CTRL_PROLINE || type == A7800_CTRL_JOY2600) {
         dir = slot->dpad_dir;
         if (s->opts.analog_joystick) {
@@ -444,10 +510,10 @@ static void poll_one(gamepad_state *g, pad_slot *slot, int port,
         want_action(want, A7800_ACT_RIGHT, dir & A7800_DIR_RIGHT);
     }
 
-    for (a = 0; a < A7800_ACT_PER_PORT; a++) {
-        if (want[a] != slot->sent[a]) {
-            slot->sent[a] = want[a];
-            session_gamepad_apply(g->session, port, a, want[a]);
+    for (act = 0; act < A7800_ACT_PER_PORT; act++) {
+        if (want[act] != slot->sent[act]) {
+            slot->sent[act] = want[act];
+            input_press(s, A7800_SRC_STICK(slot->owner), A7800_TARGET_PORT(port, act), want[act]);
         }
     }
 
@@ -496,16 +562,14 @@ static void *thread_main(void *arg)
         for (i = 0; i < count; i++) open_pad(g, ids[i]);
         SDL_free(ids);
     }
+    /* only the first scan is quiet: a pad plugged in later is a hot-plug */
+    pthread_mutex_lock(&g->lock);
+    g->quiet_scan = 0;
+    pthread_mutex_unlock(&g->lock);
 
     while (!g->stop_requested) {
         SDL_Event ev;
-        int npads, have;
-
-        pthread_mutex_lock(&g->lock);
-        npads = g->npads;
-        pthread_mutex_unlock(&g->lock);
-        have = SDL_PollEvent(&ev);
-        while (have) {
+        while (SDL_PollEvent(&ev)) {
             switch (ev.type) {
             case SDL_EVENT_JOYSTICK_ADDED: open_pad(g, ev.jdevice.which); break;
             case SDL_EVENT_JOYSTICK_REMOVED: close_pad(g, ev.jdevice.which); break;
@@ -538,14 +602,12 @@ static void *thread_main(void *arg)
             default:
                 break;
             }
-            have = SDL_PollEvent(&ev);
         }
         poll_sticks(g);
-        /* ~60 Hz while a pad is attached (the machine's own sampling rate).
-         * With none there are no sticks to sample, only hotplug to notice,
-         * which can wait a tenth of a second. (SDL_WaitEventTimeout is no
-         * help: SDL polls inside it at about 1 kHz.) */
-        SDL_Delay(npads > 0 ? 16 : 100);
+        /* ~60 Hz, the machine's own sampling rate, with a pad; with none only
+         * hot-plug events are waited for. Not SDL_WaitEventTimeout: SDL polls
+         * at 1 kHz inside it. */
+        SDL_Delay(g->npads > 0 ? 16 : 100);
     }
 
     pthread_mutex_lock(&g->lock);
@@ -561,6 +623,9 @@ int gamepad_start(struct a7800session *s)
     if (s->gamepad) return 0;
     /* The app owns its signals; SDL must not intercept SIGINT/SIGTERM. */
     SDL_SetHint(SDL_HINT_NO_SIGNAL_HANDLERS, "1");
+    /* the poll thread is not the focused window: keep reading pads when the
+     * app is in the background (the debugger or another window has focus) */
+    SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
     /* Bluetooth pads over hidapi and the joystick subsystem together. */
     SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI, "1");
     if (!SDL_InitSubSystem(SDL_INIT_GAMEPAD)) {
@@ -571,6 +636,13 @@ int gamepad_start(struct a7800session *s)
     if (!g) { SDL_QuitSubSystem(SDL_INIT_GAMEPAD); return -1; }
     g->session = s;
     pthread_mutex_init(&g->lock, NULL);
+    /* the generation carries across a restart, so a frontend's baseline never
+     * goes stale; a restarted thread's first scan re-finds the same pads, which
+     * is no hot-plug: no toast and no change of generation */
+    g->generation = s->pad_gen_base;
+    g->quiet_scan = s->pad_restarted;
+    /* the remembered assignments, once: garbage or no key is an empty table */
+    a7800_pad_table_decode(&g->table, a7800session_get_str(s, "pad_assign", ""), A7800_PORTS);
     /* An explicit stack: the platform default is 512 KB on macOS, and SDL's
      * HID enumeration runs on this thread. */
     pthread_attr_t attr;
@@ -597,6 +669,8 @@ void gamepad_stop(struct a7800session *s)
     if (!g) return;
     g->stop_requested = 1;
     pthread_join(g->thread, NULL);
+    s->pad_gen_base = g->generation;
+    s->pad_restarted = 1;
     pthread_mutex_destroy(&g->lock);
     s->gamepad = NULL;
     if (g_state == g) g_state = NULL;
@@ -634,11 +708,37 @@ int a7800session_gamepad_name(a7800session *s, int idx, char *dst, int dstsz)
 void a7800session_gamepad_assign(a7800session *s, int idx, int port)
 {
     gamepad_state *g = s->gamepad;
+    char text[A7800_PAD_ASSIGN_TEXT_MAX];
+    int changed = 0;
     if (!g) return;
     pthread_mutex_lock(&g->lock);
-    if (idx >= 0 && idx < g->npads)
-        g->pads[idx].assign = (port >= 0 && port < 2) ? port : -1;
+    if (idx >= 0 && idx < g->npads) {
+        pad_slot *slot = &g->pads[idx];
+        if (port >= 0 && port < A7800_PORTS) {
+            slot->assign = port;
+            slot->by_name = 0;
+            changed = a7800_pad_table_set(&g->table, slot->guidstr, slot->name, port) > 0;
+        } else {
+            const char *kguid[MAX_PADS], *kname[MAX_PADS];
+            int k, nkeep = 0;
+            slot->assign = -1;
+            slot->by_name = 0;
+            for (k = 0; k < g->npads; k++)
+                if (k != idx && g->pads[k].assign >= 0) {
+                    kguid[nkeep] = g->pads[k].guidstr;
+                    kname[nkeep++] = g->pads[k].name;
+                }
+            changed = a7800_pad_table_remove(&g->table, slot->guidstr, slot->name,
+                                            nkeep, kguid, kname);
+        }
+        if (changed && a7800_pad_table_encode(&g->table, text, sizeof text) < 0)
+            changed = 0;
+    }
     pthread_mutex_unlock(&g->lock);
+    /* the settings are written here, on the caller's thread, with the pad lock
+     * let go: the pad thread must never wait on the settings store */
+    if (changed)
+        a7800session_set_str(s, "pad_assign", text);
 }
 
 int a7800session_gamepad_assignment(a7800session *s, int idx)
@@ -667,7 +767,7 @@ unsigned a7800session_gamepad_generation(a7800session *s)
 {
     gamepad_state *g = s->gamepad;
     unsigned r;
-    if (!g) return 0;
+    if (!g) return s->pad_gen_base;
     pthread_mutex_lock(&g->lock);
     r = g->generation;
     pthread_mutex_unlock(&g->lock);

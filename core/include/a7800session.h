@@ -57,6 +57,47 @@ extern "C" {
 /* 60% of the accent: ink (glyph strokes) drawn on an accent-filled control. */
 #define A7800SESSION_ACCENT_DARK_RGB 0x90581C
 
+/* The Controllers window's art (controllers-port/DESIGN-7800.md, read from
+ * photos of the real hardware; +/- 8%). One set for every toolkit. */
+#define A7800SESSION_CASE_RGB          0x1E1E1F   /* the ProLine's black body, the console's bar */
+#define A7800SESSION_CASE_BEVEL_RGB    0x34343A   /* bevel highlight */
+#define A7800SESSION_CASE_SHADOW_RGB   0x0E0E10   /* deep shadow */
+#define A7800SESSION_PANEL_EDGE_RGB    0x2C2C30   /* the raised triangle panel's edge */
+#define A7800SESSION_DISH_RGB          0x7A7A7C   /* the grey stick's dish */
+#define A7800SESSION_DISH_RECESS_RGB   0x5E5E60   /* the four notches in it */
+#define A7800SESSION_CAP_RGB           0x8A8A8C   /* the stick's round cap */
+#define A7800SESSION_CAP_HI_RGB        0xA8A8AA   /* ... its highlight */
+#define A7800SESSION_BUTTON_RGB        0xD9482B   /* the two red buttons */
+#define A7800SESSION_BUTTON_HI_RGB     0xF07A5A   /* ... their highlight */
+#define A7800SESSION_BUTTON_RECESS_RGB 0x101010   /* ... the dark recess round each */
+#define A7800SESSION_SWOOSH_RGB        0x161618   /* the ribbed swoosh beside them */
+#define A7800SESSION_NUMERAL_RGB       0x4A4A4C   /* the embossed 1 and 2 */
+#define A7800SESSION_LOGO_RGB          0xB8B8BC   /* the embossed fuji mark and ATARI */
+#define A7800SESSION_CABLE_RGB         0x0E0E0E
+#define A7800SESSION_SOCKET_RGB        0x2A2A2E   /* the empty port's outline */
+#define A7800SESSION_BAND_HI_RGB       0xD8D8DC   /* the console's brushed silver band (top) */
+#define A7800SESSION_BAND_LO_RGB       0x9A9AA0   /* ... (bottom) */
+#define A7800SESSION_BAND_TEXT_RGB     0x7C7C82   /* "7800 PROSYSTEM" */
+#define A7800SESSION_RAINBOW_ORANGE_RGB 0xE8762A  /* the rainbow line under the band */
+#define A7800SESSION_RAINBOW_VIOLET_RGB 0x8A3A8A
+#define A7800SESSION_RAINBOW_BLUE_RGB   0x3A5FC8
+#define A7800SESSION_RAINBOW_GREEN_RGB  0x58A83A
+#define A7800SESSION_KEY_RGB           0x141416   /* SELECT / RESET / PAUSE keys */
+#define A7800SESSION_KEY_LABEL_RGB     0xD8D8DC   /* ... their legends */
+#define A7800SESSION_SLIDE_SLOT_RGB    0x101010   /* a difficulty slide's slot */
+#define A7800SESSION_SLIDE_KNOB_RGB    0xC9C9C9   /* ... its silver slider */
+/* The CX40 on a 2600-joystick port (DESIGN-atari.md section 2). */
+#define A7800SESSION_CX40_CASE_RGB     0x1C1C1C
+#define A7800SESSION_CX40_BEVEL_RGB    0x2A2A2A
+#define A7800SESSION_CX40_FIRE_RGB     0xE23B1F
+#define A7800SESSION_CX40_FIRE_HI_RGB  0xF05A38
+#define A7800SESSION_CX40_RING_RGB     0x101010
+#define A7800SESSION_CX40_TICK_RGB     0x3A3A3A
+/* A held part: a ring in this colour with a 35% fill of it; a held red button
+ * also darkens its fill to HELD_BUTTON_FILL. */
+#define A7800SESSION_HELD_RGB          0xFFB04A
+#define A7800SESSION_HELD_BUTTON_FILL_RGB 0xB02A14
+
 typedef struct a7800session a7800session;
 typedef struct a7800debug a7800debug;
 
@@ -97,6 +138,9 @@ typedef enum {
     A7800_REGION_AUTO = 0, A7800_REGION_NTSC, A7800_REGION_PAL,
     A7800_REGION_COUNT
 } a7800_region;
+
+/* Controller ports the console has. */
+#define A7800_PORTS 2
 
 /* What is plugged into a controller port. AUTO follows the running game:
  * the light gun for the light-gun titles, a ProLine joystick otherwise. */
@@ -243,6 +287,7 @@ typedef enum {
  * console switches (Select, Reset, Pause) follow `down`; the difficulty
  * switches TOGGLE on press. */
 void a7800session_press(a7800session *s, int target, int down);
+/* (a7800session_press is the pointer source's hold: see "input sources".) */
 void a7800session_sysaction(a7800session *s, int sysact);
 /* Momentary console switches as a whole: press, hold a few frames, release
  * (for menu items and on-screen buttons). */
@@ -251,12 +296,45 @@ void a7800session_switch_pulse(a7800session *s, int sw);
  * report whether they are held. Persisted as left_diff / right_diff. */
 int  a7800session_switch_get(a7800session *s, int sw);
 void a7800session_switch_set(a7800session *s, int sw, int on);
-/* Release everything the keyboard holds (focus loss). */
+
+/* ---- input sources -------------------------------------------------------
+ * Every way of holding an input is a source of its own (the keyboard, the
+ * Controllers window's pointer, each gamepad's buttons and its stick), and the
+ * console sees their merge, opposed directions cancelled. A source can only
+ * ever release what it held itself: a key release never drops a pad's hold,
+ * and a pad unplugged never drops a key's.
+ *
+ * a7800session_press (above) and a7800session_pointer_set are the WINDOW's
+ * pointer source; a7800session_key is the KEYBOARD's. */
+/* The pointer's hold on `port`'s actions, as a whole: bit per a7800_action (the
+ * direction bits from a7800session_stick_from_vector, a button bit, or both),
+ * ORed with every other source. A drag that changes direction passes the new
+ * mask without letting go; pass 0 when the drag ends or the pointer leaves.
+ * Distinct from a7800session_pointer (the light gun's aim over the picture). */
+void a7800session_pointer_set(a7800session *s, int port, unsigned mask);
+/* Release everything the keyboard and the window's pointer hold (focus loss,
+ * entering Map mode). A gamepad is a physical thing and is left alone. */
 void a7800session_release_all(a7800session *s);
+/* Only the window's pointer (a pressed part, the stick drag), or only the
+ * keyboard's holds. release_all is both. */
+void a7800session_release_pointer(a7800session *s);
+void a7800session_release_keyboard(a7800session *s);
+/* The keyboard's and the pointer's holds, both (same as release_all; the name
+ * the sibling cores use). */
+void a7800session_clear_held(a7800session *s);
 /* What the console sees held on a port right now (keyboard, gamepads and
- * the on-screen controller together), one bit per a7800_action. For a
- * controller window's highlights. */
+ * the on-screen controller together, opposed pairs cancelled), one bit per
+ * a7800_action. For a controller window's highlights: the window is a gamepad
+ * tester. */
 unsigned a7800session_buttons_held(a7800session *s, int port);
+/* Whether a console switch is held from any source: Select, Reset and Pause
+ * follow their keys (and a menu's pulse); the difficulty switches report their
+ * position (1 = A, pro), as a7800session_switch_get. */
+int a7800session_switch_held(a7800session *s, int sw);
+/* Lit state of a target for the window's highlights: a port action or a
+ * momentary switch is 1 while held; a difficulty switch is 1 at A; a system
+ * action is never held. */
+int a7800session_target_held(a7800session *s, int target);
 
 /* The pointer over the picture, for light guns: (x, y) in frame pixels
  * (0..FB_WIDTH-1, 0..height-1), `inside` whether it is over the picture at
@@ -349,7 +427,13 @@ void a7800session_binding_set_key(a7800session *s, int target, uint32_t keysym,
                                   char *stolen, int stolensz);
 void a7800session_binding_set_button(a7800session *s, int target, int button,
                                      char *stolen, int stolensz);
+/* Unbind both the key and the pad button of a target. */
+void a7800session_binding_clear(a7800session *s, int target);
 void a7800session_bindings_reset(a7800session *s);
+/* 1 for the keys the frontends own and no binding can take: F9 (the
+ * Controllers window), F11 (full screen), F12 (the debugger). A set_key with
+ * one is ignored; a stored one is dropped on load. */
+int  a7800session_key_reserved(uint32_t keysym);
 const char *a7800_pad_button_name(int button);
 /* The target a keysym / pad button drives, or -1. */
 int a7800session_target_for_key(a7800session *s, uint32_t keysym);
@@ -368,6 +452,9 @@ void a7800session_set_port_type(a7800session *s, int port, int type);
 int  a7800session_port_type(a7800session *s, int port);
 /* What AUTO resolved to for the running game (never AUTO itself). */
 int  a7800session_port_detected(a7800session *s, int port);
+/* The controller to draw on a port: what is set, or for AUTO what the game
+ * needs; never AUTO. Pass both ports to a7800session_controls_layout. */
+int  a7800session_view_type(a7800session *s, int port);
 void a7800session_set_analog(a7800session *s, int joystick);
 
 /* ---- region (takes effect at once: a new console) ------------------------*/
@@ -409,9 +496,72 @@ int  a7800session_hsc_available(a7800session *s);
 void a7800session_set_hsc(a7800session *s, int on);
 int  a7800session_hsc(a7800session *s);
 
+/* ---- the on-screen controllers ---------------------------------------------
+ * One layout for every toolkit: a view per port that follows what is plugged
+ * in (a ProLine joystick, a 2600 CX40, the XG-1 light gun or nothing), over
+ * the console strip. In the layout units of DESIGN-7800.md (a port's view is
+ * 16 x 8 u, the console strip 33 x 5.5 u) from the top-left, so a frontend
+ * draws each device's art in its own local coordinates plus the part's
+ * offset. Every type has the same extent, so the window never changes size when
+ * a port's type or the running game changes it. `target` is the binding target
+ * a part drives (A7800_TARGET_*), or -1 for the parts that are dragged (the
+ * stick) and for bodies and captions that are only drawn. The returned table
+ * is static and valid for the process.
+ *
+ * How to drive and light each kind:
+ *  - STICK: press and drag; a7800session_stick_from_vector(dx, dy, w / 2) from
+ *    the part's centre gives the direction mask for a7800session_pointer_set(port,
+ *    mask) (OR in the button bits the pointer also holds; there are none at the
+ *    same time in one gesture). 0 on release. Light the direction sectors
+ *    from a7800session_buttons_held(port) and shift the cap toward them.
+ *  - ROUND_BUTTON / BUTTON: press and release with a7800session_press(target,
+ *    down); lit while a7800session_target_held(target).
+ *  - SWITCH (a difficulty slide): a7800session_press(target, 1) flips it on
+ *    the click (the release does nothing); its position is
+ *    a7800session_switch_get(sw): 1 = A (pro, slider at the right), 0 = B
+ *    (novice, slider at the left). A position, not a held light.
+ *  - BODY entries name the art by `device` (a7800_ctrl_type, never AUTO; -1 for
+ *    the console's) and `label`; a LIGHTGUN or NONE port has no pressable part. */
+typedef enum {
+    A7800_CTL_CAPTION = 0, /* text: "Player 1", "Aim on the picture", "No controller" */
+    A7800_CTL_BODY,        /* drawn only: a controller, the console's bar, its band, ... (see label) */
+    A7800_CTL_STICK,       /* the joystick's dish / ring: drag to tilt it; round */
+    A7800_CTL_ROUND_BUTTON,/* a red fire button (ProLine Button 1 / 2, CX40 fire); hit as a circle */
+    A7800_CTL_BUTTON,      /* a flat console key: SELECT, RESET, PAUSE; hit as a rectangle */
+    A7800_CTL_SWITCH       /* a latching difficulty slide with its A and B letters */
+} a7800_control_kind;
+
+typedef struct {
+    int kind;            /* a7800_control_kind */
+    const char *label;   /* "FIRE", "1", "2", "SELECT", "Console", "Band", "7800 PROSYSTEM", ... */
+    const char *legend;  /* a hint ("left difficulty"), or NULL */
+    int port;            /* 0 or 1, -1 for the console */
+    int target;          /* binding target, or -1 */
+    int device;          /* a7800_ctrl_type of the port's view, -1 for the console */
+    float x, y, w, h;
+} a7800_control;
+
+/* The layout for the two ports' effective types (a7800_ctrl_type; AUTO and
+ * anything unknown is drawn as a ProLine, so pass a7800session_view_type); *n
+ * is its entry count and width / height (layout units) its extent. Entries are
+ * in paint order. */
+const a7800_control *a7800session_controls_layout(int left_type, int right_type, int *n,
+                                                  float *width, float *height);
+/* The topmost pressable part under a point in layout units, as an index into
+ * the layout, or -1 (bodies and captions are never hit). Round parts are
+ * ellipses. */
+int a7800session_controls_hit(int left_type, int right_type, float x, float y);
+/* The joystick drag: the direction bits (1 << A7800_ACT_UP etc., one or two)
+ * for a pointer at (dx, dy) from the stick's centre (+x right, +y down, any
+ * unit) with `radius` the stick's reach: nothing inside a quarter of it, else
+ * one of eight 45-degree sectors. Feed it to a7800session_pointer_set. */
+unsigned a7800session_stick_from_vector(float dx, float dy, float radius);
+
 /* ---- gamepads (SDL, hotplugged; started by a7800session_start) -------------
  * Pads are assigned to ports in connection order unless assigned
- * explicitly. A pad that disconnects and reconnects gets its port back. */
+ * explicitly. An explicit assignment is remembered in the "pad_assign" setting
+ * (SDL GUID + name -> port): the pad gets it back when it reconnects and on the
+ * next run; assigning -1 (Automatic) forgets it. Only ports 0 and 1 exist. */
 int  a7800session_gamepad_count(a7800session *s);
 int  a7800session_gamepad_name(a7800session *s, int idx, char *dst, int dstsz);
 void a7800session_gamepad_assign(a7800session *s, int idx, int port); /* -1 = auto */

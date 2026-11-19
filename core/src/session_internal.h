@@ -15,6 +15,7 @@
 #include <stdint.h>
 
 #include "a7800session.h"
+#include "input_merge.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -68,8 +69,18 @@ struct a7800session {
     uint32_t live_crc;                    /* the image running in the cartridge */
 
     /* keys the keyboard currently holds, by target, so a release clears
-     * exactly what its press asserted even if the binding changed meanwhile */
+     * exactly what its press asserted even if the binding changed meanwhile
+     * (the UI thread only) */
     uint32_t held_keysym[A7800_TARGET_COUNT];
+
+    /* the input merge (input.cpp): every way of holding an input is a source
+     * (input_merge.h); the console sees their merge. input_mtx is a leaf lock:
+     * nothing is taken while it is held but MameHost's atomics. */
+    pthread_mutex_t input_mtx;
+    uint8_t joy_src[A7800_PORTS][A7800_SRC_COUNT];   /* 1 << a7800_action */
+    uint8_t sw_src[A7800_SRC_COUNT];                 /* 1 << a7800_switch (momentary ones) */
+    uint8_t fwd_joy[A7800_PORTS];                    /* what MameHost was last told */
+    uint8_t fwd_sw;
 
     /* the difficulty switches (1 = A) */
     int difficulty[2];
@@ -83,6 +94,8 @@ struct a7800session {
     /* the last gamepad hot-plug event, for a frontend toast */
     pthread_mutex_t pad_event_mtx;
     char pad_event[128];
+    unsigned pad_gen_base;    /* the pad generation carries across a restart */
+    int pad_restarted;        /* the next gamepad thread's first scan is quiet */
 };
 
 void settings_init(struct a7800session *s);
@@ -106,8 +119,7 @@ void fujinet_stop(struct a7800session *s);
  * first dial-out finds the listener. Returns 0 once up, -1 on timeout. */
 int  fujinet_wait_for_boip(struct a7800session *s, int timeout_ms);
 
-/* bindings.c */
-void bindings_init(struct a7800session *s);
+/* bindings.c (bindings.h) */
 
 /* audio_sdl.c */
 int  audio_start(struct a7800session *s);
@@ -116,8 +128,6 @@ void audio_stop(struct a7800session *s);
 /* gamepad_sdl.c */
 int  gamepad_start(struct a7800session *s);
 void gamepad_stop(struct a7800session *s);
-/* Called by the gamepad thread with the button/axis state it resolved. */
-void session_gamepad_apply(struct a7800session *s, int port, int act, int down);
 /* Called by the gamepad thread on a connect/disconnect. */
 void session_gamepad_event(struct a7800session *s, const char *text);
 

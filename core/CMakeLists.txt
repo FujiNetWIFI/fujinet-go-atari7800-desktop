@@ -93,6 +93,8 @@ set(A7800_SESSION_C_SOURCES
   src/fujinet_runtime.c
   src/audio_sdl.c
   src/bindings.c
+  src/controls.c
+  src/pad_assign.c
   src/hid_keys.c
   src/help.c
   src/memtools.c
@@ -101,6 +103,7 @@ set(A7800_SESSION_C_SOURCES
   "${A7800_ROMS_C}" "${A7800_HELP_C}")
 set(A7800_SESSION_CXX_SOURCES
   src/session.cpp
+  src/input.cpp
   src/debug.cpp
   src/fujitrace.cpp
   src/vidcap.cpp)

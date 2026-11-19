@@ -127,6 +127,35 @@ a7800_link_mame(gamepad_test)
 target_include_directories(gamepad_test PRIVATE "${CMAKE_SOURCE_DIR}/core/src")
 add_test(NAME gamepad COMMAND gamepad_test)
 
+# The Controllers window's layout (ports by effective type, the console strip,
+# the hit test, the stick drag) and the shared colours, pure.
+add_executable(controls_test controls_test.c)
+target_link_libraries(controls_test PRIVATE a7800_session)
+a7800_link_mame(controls_test)
+add_test(NAME controls COMMAND controls_test)
+
+# The input sources' merge (keyboard, pointer, pads), difficulty toggles, no
+# machine.
+add_executable(input_test input_test.c)
+target_link_libraries(input_test PRIVATE a7800_session)
+target_include_directories(input_test PRIVATE "${CMAKE_SOURCE_DIR}/core/src")
+a7800_link_mame(input_test)
+add_test(NAME input COMMAND input_test)
+
+# The remembered pad -> port table, pure.
+add_executable(pad_assign_test pad_assign_test.c "${CMAKE_SOURCE_DIR}/core/src/pad_assign.c")
+target_include_directories(pad_assign_test PRIVATE "${CMAKE_SOURCE_DIR}/core/src")
+add_test(NAME pad_assign COMMAND pad_assign_test)
+
+# An SDL virtual joystick as a pad: defaults, diagonals, sources, hot-unplug,
+# reassignment and its persistence, the trigger freeze. SKIPs (77) where SDL has
+# no virtual joysticks.
+add_executable(gamepad_hotplug_test gamepad_hotplug_test.c)
+target_link_libraries(gamepad_hotplug_test PRIVATE a7800_session SDL3::SDL3)
+a7800_link_mame(gamepad_hotplug_test)
+add_test(NAME gamepad_hotplug COMMAND gamepad_hotplug_test)
+set_tests_properties(gamepad_hotplug PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 180 RUN_SERIAL ON)
+
 # The debugger contract: attach stops the machine, registers, step / over /
 # out / run to, disassembly with the PC line, breakpoints and watchpoints
 # that hit, memory, MARIA, I/O, the cartridge tab, the prompt, detach

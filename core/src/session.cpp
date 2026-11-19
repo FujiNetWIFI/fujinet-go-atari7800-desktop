@@ -23,6 +23,7 @@
 extern "C" {
 #include "a78info.h"
 #include "a7800debug.h"
+#include "bindings.h"
 #include "session_internal.h"
 }
 
@@ -294,6 +295,7 @@ extern "C" a7800session* a7800session_new(const a7800session_paths* paths)
 
 	pthread_mutex_init(&s->settings_mtx, nullptr);
 	pthread_mutex_init(&s->sysact_mtx, nullptr);
+	pthread_mutex_init(&s->input_mtx, nullptr);
 	pthread_mutex_init(&s->pad_event_mtx, nullptr);
 
 	if(paths_init(s, paths ? paths->config_dir : nullptr,
@@ -326,10 +328,12 @@ extern "C" void a7800session_free(a7800session* s)
 	if(!s) return;
 	a7800session_stop(s);
 	a7800session_settings_flush(s);
+	bindings_shutdown(s);
 	settings_free_all(s);
 	a7800debug_destroy(s);
 	delete host_of(s);
 	pthread_mutex_destroy(&s->sysact_mtx);
+	pthread_mutex_destroy(&s->input_mtx);
 	pthread_mutex_destroy(&s->pad_event_mtx);
 	free(s);
 }
@@ -641,31 +645,6 @@ extern "C" void a7800session_set_volume(a7800session* s, int percent)
 
 // ---- input -----------------------------------------------------------------
 
-extern "C" void a7800session_press(a7800session* s, int target, int down)
-{
-	if(target < 0 || target >= A7800_TARGET_COUNT) return;
-
-	if(target < 2 * A7800_ACT_PER_PORT)
-	{
-		host_of(s)->SetAction(target / A7800_ACT_PER_PORT, target % A7800_ACT_PER_PORT, down != 0);
-		return;
-	}
-	target -= 2 * A7800_ACT_PER_PORT;
-	if(target < A7800_SW_COUNT)
-	{
-		if(target == A7800_SW_LEFT_DIFF || target == A7800_SW_RIGHT_DIFF)
-		{
-			if(down)
-				a7800session_switch_set(s, target, !a7800session_switch_get(s, target));
-			return;
-		}
-		host_of(s)->SetSwitch(target, down != 0);
-		return;
-	}
-	if(down)
-		a7800session_sysaction(s, target - A7800_SW_COUNT);
-}
-
 extern "C" void a7800session_switch_pulse(a7800session* s, int sw)
 {
 	if(sw == A7800_SW_LEFT_DIFF || sw == A7800_SW_RIGHT_DIFF)
@@ -739,12 +718,6 @@ extern "C" int a7800session_sysaction_take(a7800session* s, int* out)
 	return found;
 }
 
-extern "C" unsigned a7800session_buttons_held(a7800session* s, int port)
-{
-	if(port < 0 || port > 1) return 0;
-	return host_of(s)->GetActions(port);
-}
-
 extern "C" void a7800session_pointer(a7800session* s, int x, int y, int inside, unsigned buttons)
 {
 	host_of(s)->SetPointer(x, y, inside != 0, buttons);
@@ -754,14 +727,6 @@ extern "C" int a7800session_lightgun_active(a7800session* s)
 {
 	if(!s->running) return 0;
 	return host_of(s)->Controller(0) == 2 || host_of(s)->Controller(1) == 2;
-}
-
-// The gamepad thread's entry point: the same routing as press, but never
-// touching the settings or the debugger from that thread.
-extern "C" void session_gamepad_apply(struct a7800session* s, int port, int act, int down)
-{
-	if(port < 0 || port > 1 || act < 0 || act >= A7800_ACT_PER_PORT) return;
-	host_of(s)->SetAction(port, act, down != 0);
 }
 
 // ---- controller types / region ----------------------------------------------

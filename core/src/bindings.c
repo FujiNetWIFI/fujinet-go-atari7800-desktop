@@ -27,6 +27,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "bindings.h"
 #include "hid_keys.h"
 #include "session_internal.h"
 
@@ -58,10 +59,11 @@ static void seed_button(int target, int button)
  * button and a light gun's trigger are Button 1); player 2 on I J K L with
  * N and M. The console's Select, Reset and Pause are F1, F2 and F3 -- the
  * Atari 2600 sibling's Select / Reset / Color-B&W keys, and the 7800's Pause
- * is that switch in 2600 mode. The difficulty switches toggle from the
- * Console menu (Alt+L / Alt+R in the frontends). Escape is Reboot to
- * CONFIG. F5/F7/F8/F12 are the family's debugger keys and stay free of the
- * machine. */
+ * is that switch in 2600 mode. The difficulty switches have NO default key:
+ * the frontends' Console menus own Alt+L / Alt+R as accelerators (a binding
+ * is a bare keysym, and L is player 2's Right). Escape is Reboot to CONFIG.
+ * F5/F7/F8 are the family's debugger keys and F9 / F11 / F12 the frontends'
+ * own (Controllers window, full screen, debugger): never bindable. */
 static void compute_defaults_locked(void)
 {
     int t;
@@ -124,6 +126,13 @@ static uint32_t fold(uint32_t keysym)
 
 /* ---- persistence ---------------------------------------------------------- */
 
+/* F9 (the Controllers window), F11 (full screen) and F12 (the debugger) are
+ * the frontends': never bindable, so no setting can take them from a window. */
+int a7800session_key_reserved(uint32_t keysym)
+{
+    return keysym == A7800_KEYSYM_F9 || keysym == A7800_KEYSYM_F11 || keysym == A7800_KEYSYM_F12;
+}
+
 static void apply_persisted_locked(const char *packed)
 {
     const char *p = packed;
@@ -132,7 +141,8 @@ static void apply_persisted_locked(const char *packed)
         const char *end = strchr(p, ' ');
         if (sscanf(p, "%d.%c:%ld", &target, &kind, &value) == 3
             && target >= 0 && target < A7800_TARGET_COUNT) {
-            if (kind == 'k') s_table[target].keysym = (uint32_t)value;
+            if (kind == 'k') s_table[target].keysym =
+                a7800session_key_reserved((uint32_t)value) ? 0 : (uint32_t)value;
             else if (kind == 'b') s_table[target].button = (int)value;
         }
         if (!end) break;
@@ -182,6 +192,15 @@ void bindings_init(struct a7800session *s)
     s_store = s;
     if (s)
         apply_persisted_locked(a7800session_get_str(s, "bindings", ""));
+    pthread_mutex_unlock(&s_lock);
+}
+
+/* The table is process-global; it must not keep saving into a session that
+ * has been freed. */
+void bindings_shutdown(struct a7800session *s)
+{
+    pthread_mutex_lock(&s_lock);
+    if (s_store == s) s_store = NULL;
     pthread_mutex_unlock(&s_lock);
 }
 
@@ -262,8 +281,10 @@ void a7800session_binding_set_key(a7800session *s, int target, uint32_t keysym,
 {
     int victims[A7800_TARGET_COUNT], nvictims = 0, t;
     (void)s;
+    if (stolen && stolensz > 0) stolen[0] = '\0';
     if (target < 0 || target >= A7800_TARGET_COUNT) return;
     keysym = fold(keysym);
+    if (a7800session_key_reserved(keysym)) return;
     pthread_mutex_lock(&s_lock);
     ensure_seeded_locked();
     if (keysym) {
@@ -285,6 +306,7 @@ void a7800session_binding_set_button(a7800session *s, int target, int button,
     int victims[A7800_TARGET_COUNT], nvictims = 0, t;
     int port = target / A7800_ACT_PER_PORT;   /* 2 = switches/sysactions */
     (void)s;
+    if (stolen && stolensz > 0) stolen[0] = '\0';
     if (target < 0 || target >= A7800_TARGET_COUNT) return;
     pthread_mutex_lock(&s_lock);
     ensure_seeded_locked();
@@ -304,6 +326,18 @@ void a7800session_binding_set_button(a7800session *s, int target, int button,
     persist_locked();
     pthread_mutex_unlock(&s_lock);
     describe_stolen(victims, nvictims, stolen, stolensz);
+}
+
+void a7800session_binding_clear(a7800session *s, int target)
+{
+    (void)s;
+    if (target < 0 || target >= A7800_TARGET_COUNT) return;
+    pthread_mutex_lock(&s_lock);
+    ensure_seeded_locked();
+    s_table[target].keysym = 0;
+    s_table[target].button = A7800_PAD_BTN_NONE;
+    persist_locked();
+    pthread_mutex_unlock(&s_lock);
 }
 
 void a7800session_bindings_reset(a7800session *s)
@@ -448,50 +482,35 @@ int a7800session_key_sysaction(a7800session *s, uint32_t keysym)
 int a7800session_key(a7800session *s, uint32_t keysym, int down)
 {
     uint32_t folded = fold(keysym);
-    int t;
+    int t, hit = 0;
 
     if (!s) return 0;
     if (down) {
-        int hit = 0;
-        /* every target the key drives; a system action is the frontend's
-         * to fire and is not a machine input */
-        pthread_mutex_lock(&s_lock);
-        ensure_seeded_locked();
+        /* every target the key drives; a system action is the frontend's to
+         * fire and is not a machine input */
         for (t = 0; t < A7800_TARGET_SYSACT(0); t++) {
-            if (s_table[t].keysym != folded) continue;
+            int mine;
+            pthread_mutex_lock(&s_lock);
+            ensure_seeded_locked();
+            mine = s_table[t].keysym == folded;
+            pthread_mutex_unlock(&s_lock);
+            if (!mine) continue;
             hit = 1;
             if (s->held_keysym[t] == folded) continue;  /* auto-repeat */
             s->held_keysym[t] = folded;
-            pthread_mutex_unlock(&s_lock);
-            a7800session_press(s, t, 1);
-            pthread_mutex_lock(&s_lock);
-        }
-        pthread_mutex_unlock(&s_lock);
-        return hit;
-    }
-    {
-        int hit = 0;
-        /* remembered by the key, so a release clears exactly what its press
-         * asserted even if the binding changed in between */
-        for (t = 0; t < A7800_TARGET_COUNT; t++) {
-            if (s->held_keysym[t] == folded) {
-                s->held_keysym[t] = 0;
-                a7800session_press(s, t, 0);
-                hit = 1;
-            }
+            input_press(s, A7800_SRC_KEYBOARD, t, 1);
         }
         return hit;
     }
-}
-
-void a7800session_release_all(a7800session *s)
-{
-    int t;
-    if (!s) return;
-    for (t = 0; t < A7800_TARGET_COUNT; t++) {
-        if (s->held_keysym[t]) {
+    /* remembered by the key, so a release clears exactly what its press
+     * asserted even if the binding changed in between -- and only the
+     * keyboard's own hold: a pad or the window holding the same input keeps it */
+    for (t = 0; t < A7800_TARGET_SYSACT(0); t++) {
+        if (s->held_keysym[t] == folded) {
             s->held_keysym[t] = 0;
-            a7800session_press(s, t, 0);
+            input_press(s, A7800_SRC_KEYBOARD, t, 0);
+            hit = 1;
         }
     }
+    return hit;
 }
