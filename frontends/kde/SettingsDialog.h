@@ -19,6 +19,7 @@ extern "C" {
 class SettingsDialog : public QDialog {
     Q_OBJECT
 public:
-    /* Returns true if a restart option changed. */
-    static bool run(QWidget *parent, a7800session *session);
+    /* Returns true if a restart option changed. *openControllers is set when
+     * the dialog was closed with "Open Controllers". */
+    static bool run(QWidget *parent, a7800session *session, bool *openControllers = nullptr);
 };

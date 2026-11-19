@@ -1,88 +1,72 @@
 /*
- * The Controllers window: both ProLine joysticks on screen (they press the
- * machine's controls and light up with whatever the keyboard, a gamepad or
- * the mouse is holding), the console's switches -- Select, Reset, Pause and
- * the two difficulty switches -- and Reboot to CONFIG, each port's
- * controller type and gamepad assignment, and Map mode for rebinding any
- * control to a key or a gamepad button.
+ * The Controllers window (F9): both controller ports drawn as what is plugged
+ * in (a ProLine joystick, a 2600 CX40, the XG-1 light gun or an empty socket)
+ * over the console's front panel (PAUSE, SELECT, RESET, the two difficulty
+ * slides), from a7800session_controls_layout; each port's type, the gamepads
+ * with their assignments, and Map mode for rebinding. Hidden at start; a
+ * fixed-size floating window.
+ *
+ * Copyright (C) 2026 Thomas Cherryhomes
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 #pragma once
 
 #include <QComboBox>
-#include <QFormLayout>
 #include <QLabel>
 #include <QPushButton>
 #include <QTimer>
+#include <QVBoxLayout>
 #include <QWidget>
 #include <vector>
 
 #include "a7800session.h"
 
-/* A button that reports press and release, not "clicked": a joystick
- * button is HELD, since the machine samples it once per frame. */
-class PadButton : public QPushButton {
-    Q_OBJECT
-public:
-    PadButton(const QString &face, int target, QWidget *parent = nullptr);
-    int target() const { return m_target; }
-    QString face() const { return m_face; }
-    /* the label outside Map mode (a difficulty switch shows its position) */
-    void setFace(const QString &face) { m_face = face; }
-    void setHeld(bool held);
-signals:
-    void pressedTarget(int target);
-    void releasedTarget(int target);
-protected:
-    void mousePressEvent(QMouseEvent *e) override;
-    void mouseReleaseEvent(QMouseEvent *e) override;
-    void leaveEvent(QEvent *e) override;
-private:
-    int m_target;
-    QString m_face;
-    bool m_down = false;
-    bool m_held = false;
-};
+class ControllersStage;
+class ControllersHint;
 
 class ControllersWindow : public QWidget {
-    Q_OBJECT
 public:
     explicit ControllersWindow(a7800session *session, QWidget *parent = nullptr);
 
+    /* Shows the window and raises it. */
+    void present();
+
 protected:
-    void keyPressEvent(QKeyEvent *e) override;
-    void keyReleaseEvent(QKeyEvent *e) override;
-    void showEvent(QShowEvent *e) override;
-    void hideEvent(QHideEvent *e) override;
+    bool event(QEvent *evt) override;
+    void keyPressEvent(QKeyEvent *evt) override;
+    void keyReleaseEvent(QKeyEvent *evt) override;
+    void showEvent(QShowEvent *evt) override;
+    void hideEvent(QHideEvent *evt) override;
+    void changeEvent(QEvent *evt) override;
+    /* Tab is a key of the console's, not focus traversal. */
+    bool focusNextPrevChild(bool) override { return false; }
 
 private:
-    QWidget *buildController(int port);
-    QWidget *buildConsole();
-    PadButton *control(const QString &face, int target);
-    void onPressed(int target);
-    void onReleased(int target);
     void setMapState(int state);
-    void refreshLabels();
-    void refreshFaces();
+    void bound(const QString &what, const QString &stolen);
     void pollCapture();
-    void poll();
+    void pollSlow();
+    void syncTypes();
     void rebuildPads();
+    void refreshPadPlayers();
 
     a7800session *m_session;
-    std::vector<PadButton *> m_controls;
-    PadButton *m_diff[2] = { nullptr, nullptr };
-    QPushButton *m_mapButton = nullptr;
-    QLabel *m_hint = nullptr;
-    QComboBox *m_type[2] = { nullptr, nullptr };
-    QLabel *m_portNote[2] = { nullptr, nullptr };
-    int m_shownType[2] = { -1, -1 };
-    QFormLayout *m_padForm = nullptr;
+    ControllersStage *m_stage = nullptr;
+    QComboBox *m_type[A7800_PORTS] = {};
+    QWidget *m_padArea = nullptr;
+    QVBoxLayout *m_padBox = nullptr;
     std::vector<QWidget *> m_padRows;
+    std::vector<QLabel *> m_padEff;       /* each pad's "plays Player N" */
     unsigned m_padGen = ~0u;
-    int m_mouseHeld = -1;      /* the target the mouse is holding, if any */
+    QPushButton *m_mapButton = nullptr;
+    QPushButton *m_clearButton = nullptr;
+    QPushButton *m_sysButton[A7800_SYSACT_COUNT] = {};
+    ControllersHint *m_hint = nullptr;
     QTimer m_captureTimer;
-    QTimer m_pollTimer;
-    /* -2 idle, -1 armed and waiting for a target, >=0 waiting for a key or
-     * gamepad button. */
+    QTimer m_heldTimer;
+    QTimer m_slowTimer;
+    uint32_t m_swallow = 0;               /* the key Map took: its repeats and release too */
+    /* -2 idle, -1 armed and waiting for a target, >= 0 waiting for a key or
+     * gamepad button for that target. */
     int m_mapState = -2;
 };

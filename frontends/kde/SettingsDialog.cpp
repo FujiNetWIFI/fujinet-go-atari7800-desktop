@@ -14,7 +14,9 @@
 #include <QFormLayout>
 #include <QGroupBox>
 #include <QLabel>
+#include <QHBoxLayout>
 #include <QLineEdit>
+#include <QPushButton>
 #include <QMessageBox>
 #include <QSlider>
 #include <QStandardItemModel>
@@ -71,7 +73,7 @@ void labelAuto(QComboBox *box, a7800session *s, int port)
 
 } // namespace
 
-bool SettingsDialog::run(QWidget *parent, a7800session *session)
+bool SettingsDialog::run(QWidget *parent, a7800session *session, bool *openControllers)
 {
     QDialog dlg(parent);
     dlg.setObjectName(QStringLiteral("prefs"));
@@ -121,9 +123,13 @@ bool SettingsDialog::run(QWidget *parent, a7800session *session)
                      [=](bool on) { a7800session_set_int(session, "smooth", on ? 1 : 0); });
     outer->addWidget(picture);
 
-    /* Controllers (live) */
-    auto *ports = new QGroupBox(QStringLiteral("Controllers (applied immediately, even to a game booted over FujiNet)"));
-    auto *pform = new QFormLayout(ports);
+    /* Input: what is plugged in, the gamepads and the way into the Controllers
+     * window (live, even for a game booted over FujiNet) */
+    auto *ports = new QGroupBox(QStringLiteral("Input (applied immediately, even to a game booted over FujiNet)"));
+    ports->setProperty("a7800HelpContext", QStringLiteral("prefs/Input"));
+    auto *portsBox = new QVBoxLayout(ports);
+    auto *pform = new QFormLayout;
+    portsBox->addLayout(pform);
     for (int port = 0; port < 2; ++port) {
         auto *box = new QComboBox;
         for (int i = 0; a7800_ctrl_type_name(i); ++i)
@@ -140,7 +146,8 @@ bool SettingsDialog::run(QWidget *parent, a7800session *session)
     QCheckBox *aj = check("Analog sticks drive the joystick", "A gamepad's left stick moves the joystick, as well as its D-pad", session, "analog_joystick", 1);
     QObject::connect(aj, &QCheckBox::toggled, &dlg, [=](bool on) { a7800session_set_analog(session, on ? 1 : 0); });
     pform->addRow(aj);
-    outer->addWidget(ports);
+    QCheckBox *gp = check("Enable gamepads", "Poll USB/Bluetooth gamepads (applied by restarting the session)", session, "enable_gamepad", 1);
+    pform->addRow(gp);
 
     /* Gamepads: one row per pad, refreshed as they come and go */
     auto *pads = new QGroupBox(QStringLiteral("Gamepads (assigned to players in connection order unless chosen here)"));
@@ -181,7 +188,29 @@ bool SettingsDialog::run(QWidget *parent, a7800session *session)
     padTimer->start(1000);
     seenGen = a7800session_gamepad_generation(session);
     rebuildPads();
-    outer->addWidget(pads);
+    portsBox->addWidget(pads);
+
+    auto *controlsRow = new QHBoxLayout;
+    auto *resetControls = new QPushButton(QStringLiteral("Reset Controls"));
+    resetControls->setToolTip(QStringLiteral("Put every key and gamepad button back to its default"));
+    auto *openWindow = new QPushButton(QStringLiteral("Open Controllers"));
+    openWindow->setToolTip(QStringLiteral("Close Preferences and open the Controllers window (F9), where keys and gamepad buttons are re-mapped"));
+    auto *resetState = new QLabel;
+    resetState->setStyleSheet(QStringLiteral("color: gray;"));
+    QObject::connect(resetControls, &QPushButton::clicked, &dlg, [session, resetState] {
+        a7800session_bindings_reset(session);
+        resetState->setText(QStringLiteral("Every key and gamepad button is back to its default."));
+    });
+    QObject::connect(openWindow, &QPushButton::clicked, &dlg, [&dlg, openControllers] {
+        if (openControllers) *openControllers = true;
+        dlg.accept();
+    });
+    controlsRow->addWidget(resetControls);
+    controlsRow->addWidget(openWindow);
+    controlsRow->addWidget(resetState, 1);
+    controlsRow->addWidget(a7800HelpButton(QStringLiteral("prefs/Input")));
+    portsBox->addLayout(controlsRow);
+    outer->addWidget(ports);
 
     /* Audio (live) */
     auto *audio = new QGroupBox(QStringLiteral("Audio"));
@@ -198,7 +227,6 @@ bool SettingsDialog::run(QWidget *parent, a7800session *session)
     auto *hform = new QVBoxLayout(host);
     QCheckBox *fuji = check("Enable FujiNet", "Run the in-process FujiNet the cartridge dials into. Off means no network and a link-down CONFIG client.", session, "enable_fujinet", 1);
     QCheckBox *snd = check("Audio", "Open the system audio device", session, "enable_audio", 1);
-    QCheckBox *gp = check("Gamepads", "Poll USB/Bluetooth gamepads", session, "enable_gamepad", 1);
     QCheckBox *external = check("Use external FujiNet", "Skip the built-in FujiNet and dial another instance. Start that instance listening on this address (its [BOIP] port).", session, "fujinet_external", 0);
     auto *externalAddr = new QLineEdit(QString::fromUtf8(a7800session_get_str(session, "fujinet_external_addr", "")));
     externalAddr->setPlaceholderText(QStringLiteral("127.0.0.1:11510"));
@@ -207,7 +235,7 @@ bool SettingsDialog::run(QWidget *parent, a7800session *session)
     auto *addrForm = new QFormLayout;
     addrForm->addRow(QStringLiteral("Address:port"), externalAddr);
     hform->addWidget(fuji); hform->addWidget(external); hform->addLayout(addrForm);
-    hform->addWidget(snd); hform->addWidget(gp);
+    hform->addWidget(snd);
     outer->addWidget(host);
 
     /* Help, F1 and Ctrl+Shift+H (the app's shortcuts don't reach a modal dialog) */

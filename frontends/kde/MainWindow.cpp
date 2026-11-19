@@ -74,7 +74,7 @@ MainWindow::MainWindow(a7800session *session, QWidget *parent)
      * a gamepad or the Controllers window on the same beat. */
     connect(&m_sysactTimer, &QTimer::timeout, this, &MainWindow::drainSysactions);
     connect(&m_sysactTimer, &QTimer::timeout, this, &MainWindow::syncSwitches);
-    m_sysactTimer.start(100);
+    m_sysactTimer.start(40);
     /* Gamepads come and go on their own thread; say so when they do. */
     m_padGen = a7800session_gamepad_generation(session);
     connect(&m_padTimer, &QTimer::timeout, this, &MainWindow::pollGamepads);
@@ -235,10 +235,15 @@ void MainWindow::showAbout()
 
 void MainWindow::showSettings()
 {
-    const bool restart = SettingsDialog::run(this, m_session);
+    bool openControllers = false;
+    const bool restart = SettingsDialog::run(this, m_session, &openControllers);
     applyPicture();
     updateStatus();
     if (restart) restartSession();
+    if (openControllers) {
+        if (!m_controllers) m_controllers = new ControllersWindow(m_session, this);
+        m_controllers->present();
+    }
 }
 
 void MainWindow::useSoftwareDisplay()
@@ -302,7 +307,7 @@ void MainWindow::toggleControllers()
 {
     if (!m_controllers) m_controllers = new ControllersWindow(m_session, this);
     if (m_controllers->isVisible()) m_controllers->hide();
-    else m_controllers->show();
+    else m_controllers->present();
 }
 
 void MainWindow::runSysaction(int sa)
@@ -434,7 +439,8 @@ void MainWindow::keyReleaseEvent(QKeyEvent *e)
 bool MainWindow::event(QEvent *e)
 {
     if (e->type() == QEvent::WindowDeactivate) {
-        a7800session_release_all(m_session);
+        /* the keyboard's holds only: the Controllers window's mouse holds are its own */
+        a7800session_release_keyboard(m_session);
         for (bool &d : m_sysactDown) d = false;
     }
     return QMainWindow::event(e);
