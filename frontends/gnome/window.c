@@ -103,14 +103,26 @@ static void run_sysaction(A7800Window *self, int sa)
     }
 }
 
-static gboolean on_key_pressed(GtkEventControllerKey *ctrl, guint keyval,
-                               guint keycode, GdkModifierType state,
-                               gpointer user_data)
+/* One key, from the main window or from the Controllers window (which hands
+ * over everything that is not Map's): the window's own keys, a system action,
+ * or a machine key. */
+gboolean a7800_window_key(A7800Window *self, guint keyval, guint keycode,
+                          GdkModifierType state, gboolean down)
 {
-    A7800Window *self = user_data;
     guint32 keysym;
     int sa;
-    (void)ctrl;
+
+    if (!down) {
+        if (keyval == GDK_KEY_F9 || keyval == GDK_KEY_F11 || keyval == GDK_KEY_F12)
+            return TRUE;
+        keysym = keysym_of(keyval, keycode);
+        sa = a7800session_key_sysaction(self->session, keysym);
+        if (sa >= 0) {
+            self->sysact_down[sa] = FALSE;
+            return TRUE;
+        }
+        return a7800session_key(self->session, keysym, 0) ? TRUE : FALSE;
+    }
 
     /* F1 is the console's SELECT in the window itself, and Help while
      * Preferences or another dialog is open */
@@ -152,24 +164,20 @@ static gboolean on_key_pressed(GtkEventControllerKey *ctrl, guint keyval,
     return a7800session_key(self->session, keysym, 1) ? TRUE : FALSE;
 }
 
+static gboolean on_key_pressed(GtkEventControllerKey *ctrl, guint keyval,
+                               guint keycode, GdkModifierType state,
+                               gpointer user_data)
+{
+    (void)ctrl;
+    return a7800_window_key(user_data, keyval, keycode, state, TRUE);
+}
+
 static gboolean on_key_released(GtkEventControllerKey *ctrl, guint keyval,
                                 guint keycode, GdkModifierType state,
                                 gpointer user_data)
 {
-    A7800Window *self = user_data;
-    guint32 keysym;
-    int sa;
-    (void)ctrl; (void)state;
-
-    if (keyval == GDK_KEY_F9 || keyval == GDK_KEY_F11 || keyval == GDK_KEY_F12)
-        return TRUE;
-    keysym = keysym_of(keyval, keycode);
-    sa = a7800session_key_sysaction(self->session, keysym);
-    if (sa >= 0) {
-        self->sysact_down[sa] = FALSE;
-        return TRUE;
-    }
-    return a7800session_key(self->session, keysym, 0) ? TRUE : FALSE;
+    (void)ctrl;
+    return a7800_window_key(user_data, keyval, keycode, state, FALSE);
 }
 
 /* Losing focus with keys held would leave the machine believing they are
@@ -178,7 +186,7 @@ static void on_focus_leave(GtkEventControllerFocus *ctrl, gpointer user_data)
 {
     A7800Window *self = user_data;
     (void)ctrl;
-    a7800session_release_all(self->session);
+    a7800session_release_keyboard(self->session);
     memset(self->sysact_down, 0, sizeof self->sysact_down);
 }
 
@@ -625,7 +633,13 @@ void a7800_window_apply_aspect(A7800Window *self, int aspect)
 const char *a7800_window_help_context(A7800Window *self)
 {
     AdwDialog *d = adw_application_window_get_visible_dialog(ADW_APPLICATION_WINDOW(self));
-    return d && ADW_IS_PREFERENCES_DIALOG(d) ? "prefs/Machine" : "main";
+    if (d && ADW_IS_PREFERENCES_DIALOG(d)) {
+        static char ctx[48];
+        const char *page = adw_preferences_dialog_get_visible_page_name(ADW_PREFERENCES_DIALOG(d));
+        g_snprintf(ctx, sizeof ctx, "prefs/%s", page ? page : "Machine");
+        return ctx;
+    }
+    return "main";
 }
 
 /* app.help: every window's Ctrl+Shift+H, for what it shows. Not a cast of
@@ -925,7 +939,7 @@ GtkWidget *a7800_window_new(AdwApplication *app, a7800session *session)
     /* The current pad set is the baseline: no toast for pads that were
      * already plugged in at launch. */
     self->pad_generation = a7800session_gamepad_generation(session);
-    self->sysact_id = g_timeout_add(250, sysact_drain_tick, self);
+    self->sysact_id = g_timeout_add(40, sysact_drain_tick, self);
     sync_switches(self);
     update_status(self);
 

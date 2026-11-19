@@ -16,6 +16,7 @@
 #include "prefs.h"
 
 #include "window.h"
+#include "controllers/controllers_window.h"
 #include "help/help_window.h"
 
 typedef struct {
@@ -23,6 +24,7 @@ typedef struct {
     a7800session *session;
     void (*restart)(A7800Window *window);
     gboolean dirty;
+    AdwPreferencesDialog *dialog;
     GtkWidget *pad_group;
     GtkWidget *pad_rows[8];
     int pad_row_count;
@@ -310,6 +312,43 @@ static void rebuild_pad_rows(PrefsState *state)
     }
 }
 
+static void on_open_controllers(GtkButton *button, gpointer user_data)
+{
+    PrefsState *state = user_data;
+    (void)button;
+    a7800_controllers_window_show(GTK_WINDOW(state->window), state->session);
+}
+
+/* Every key and gamepad button back to its default, and every gamepad back to
+ * automatic assignment. */
+static void on_reset_controls(GtkButton *button, gpointer user_data)
+{
+    PrefsState *state = user_data;
+    int i;
+    (void)button;
+    a7800session_bindings_reset(state->session);
+    for (i = 0; i < a7800session_gamepad_count(state->session); i++)
+        a7800session_gamepad_assign(state->session, i, -1);
+    rebuild_pad_rows(state);
+    a7800_controllers_window_refresh();
+    adw_preferences_dialog_add_toast(state->dialog,
+        adw_toast_new("Controls back to their defaults; gamepads on automatic"));
+}
+
+/* A row with a title, a line under it and a button. */
+static GtkWidget *button_row(const char *title, const char *subtitle, const char *label,
+                             GCallback cb, gpointer data)
+{
+    GtkWidget *row = adw_action_row_new();
+    GtkWidget *button = gtk_button_new_with_label(label);
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(row), title);
+    adw_action_row_set_subtitle(ADW_ACTION_ROW(row), subtitle);
+    gtk_widget_set_valign(button, GTK_ALIGN_CENTER);
+    g_signal_connect(button, "clicked", cb, data);
+    adw_action_row_add_suffix(ADW_ACTION_ROW(row), button);
+    return row;
+}
+
 static gboolean pad_tick(gpointer user_data)
 {
     PrefsState *state = user_data;
@@ -344,11 +383,14 @@ void a7800_prefs_show(A7800Window *parent, a7800session *session,
     AdwPreferencesGroup *display = ADW_PREFERENCES_GROUP(adw_preferences_group_new());
     AdwPreferencesGroup *ports = ADW_PREFERENCES_GROUP(adw_preferences_group_new());
     AdwPreferencesGroup *pads = ADW_PREFERENCES_GROUP(adw_preferences_group_new());
+    AdwPreferencesGroup *controls = ADW_PREFERENCES_GROUP(adw_preferences_group_new());
+    AdwPreferencesPage *input = ADW_PREFERENCES_PAGE(adw_preferences_page_new());
     AdwPreferencesGroup *audio = ADW_PREFERENCES_GROUP(adw_preferences_group_new());
     AdwPreferencesGroup *host = ADW_PREFERENCES_GROUP(adw_preferences_group_new());
     GtkWidget *hsc;
 
     state->window = parent;
+    state->dialog = dialog;
     state->session = session;
     state->restart = restart;
     state->pad_group = GTK_WIDGET(pads);
@@ -381,7 +423,12 @@ void a7800_prefs_show(A7800Window *parent, a7800session *session,
         combo_row(state, "Aspect", "How the 320-pixel picture is shaped",
                   "aspect", 0, aspect_name, -4));
 
+    adw_preferences_page_set_title(input, "Input");
+    adw_preferences_page_set_name(input, "Input");
+    adw_preferences_page_set_icon_name(input, "input-gaming-symbolic");
+
     adw_preferences_group_set_title(ports, "Controllers");
+    adw_preferences_group_set_header_suffix(ports, a7800_help_button("prefs/Input"));
     adw_preferences_group_set_description(ports,
         "What is plugged into each port. Auto plugs in the light gun for the "
         "light-gun games and a ProLine joystick otherwise. Applies "
@@ -400,9 +447,26 @@ void a7800_prefs_show(A7800Window *parent, a7800session *session,
 
     adw_preferences_group_set_title(pads, "Gamepads");
     adw_preferences_group_set_description(pads,
-        "Assigned to ports in connection order unless chosen here");
+        "Assigned to ports in connection order unless chosen here, and remembered. "
+        "Enabling gamepads is read when the session starts, so changing it restarts "
+        "the session when Preferences closes.");
+    adw_preferences_group_add(pads,
+        switch_row(state, "Enable gamepads", "Poll USB/Bluetooth gamepads",
+                   "enable_gamepad", 1, -1));
     rebuild_pad_rows(state);
     state->pad_generation = a7800session_gamepad_generation(session);
+
+
+    adw_preferences_group_set_title(controls, "Controls");
+    adw_preferences_group_set_description(controls,
+        "Keys and gamepad buttons are re-mapped in the Controllers window (F9): press "
+        "Map, choose a control, then press the key or gamepad button to give it.");
+    adw_preferences_group_add(controls,
+        button_row("Controllers window", "The ports, the console's keys and Map",
+                   "Open Controllers", G_CALLBACK(on_open_controllers), state));
+    adw_preferences_group_add(controls,
+        button_row("Reset Controls", "Put every key and gamepad button back to its default",
+                   "Reset Controls", G_CALLBACK(on_reset_controls), state));
 
     adw_preferences_group_set_title(audio, "Audio");
     {
@@ -442,16 +506,16 @@ void a7800_prefs_show(A7800Window *parent, a7800session *session,
     }
     adw_preferences_group_add(host,
         switch_row(state, "Audio", "Open the system audio device", "enable_audio", 1, -1));
-    adw_preferences_group_add(host,
-        switch_row(state, "Gamepads", "Poll USB/Bluetooth gamepads", "enable_gamepad", 1, -1));
 
     adw_preferences_page_add(page, console);
     adw_preferences_page_add(page, display);
-    adw_preferences_page_add(page, ports);
-    adw_preferences_page_add(page, pads);
     adw_preferences_page_add(page, audio);
     adw_preferences_page_add(page, host);
+    adw_preferences_page_add(input, ports);
+    adw_preferences_page_add(input, pads);
+    adw_preferences_page_add(input, controls);
     adw_preferences_dialog_add(dialog, page);
+    adw_preferences_dialog_add(dialog, input);
     g_signal_connect(dialog, "closed", G_CALLBACK(prefs_closed), state);
     state->pad_timer = g_timeout_add(1000, pad_tick, state);
     adw_dialog_present(ADW_DIALOG(dialog), GTK_WIDGET(parent));

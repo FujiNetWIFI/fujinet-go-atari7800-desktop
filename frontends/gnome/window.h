@@ -16,9 +16,14 @@ GtkWidget *a7800_window_new(AdwApplication *app, a7800session *session);
 /* main.c: the icon name to use (the installed id, or the in-tree art). */
 const char *a7800_icon_name(void);
 void a7800_window_toast(A7800Window *self, const char *text);
+/* One key as the main window handles it (F9/F11/F12, system actions, machine
+ * keys); the Controllers window forwards what is not Map's to it. Returns
+ * whether the key was used. */
+gboolean a7800_window_key(A7800Window *self, guint keyval, guint keycode,
+                          GdkModifierType state, gboolean down);
 
-/* The Help context the main window shows now: "main", or "prefs/Machine"
- * while Preferences is open. */
+/* The Help context the main window shows now: "main", or "prefs/<page>"
+ * ("prefs/Machine", "prefs/Input") while Preferences is open. */
 const char *a7800_window_help_context(A7800Window *self);
 /* The display's shape: 0 = the television's 4:3, 1 = square pixels. */
 void a7800_window_apply_aspect(A7800Window *self, int aspect);
